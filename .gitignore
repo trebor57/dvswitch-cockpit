@@ -1,0 +1,40 @@
+# Runtime/cache files
+/tmp/
+*.log
+*.pid
+*.sock
+
+# Local backups and archives
+*.bak
+*.old
+*.orig
+*.tmp
+*~
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.backup*
+backup*/
+backups*/
+*.before-*
+*.after-*
+
+# Local/private config or copied runtime files
+config.ini
+*.local
+ABInfo_*.json
+subscriber_ids.csv
+subscriber_ids.txt
+
+# Editor/OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Python/cache artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd

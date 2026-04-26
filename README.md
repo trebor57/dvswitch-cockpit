@@ -140,6 +140,16 @@ The setup script handles that for you.
 
 ---
 
+## ⚡ UPDATE INDICATOR
+
+DVSwitch Cockpit includes a small lightning-bolt update indicator beside the title.
+
+The bolt normally stays hidden. It only lights up when the `VERSION` file on GitHub is newer than the local installed `VERSION` file.
+
+This check is done quietly from the browser. If GitHub cannot be reached, Cockpit simply hides the bolt and keeps working.
+
+---
+
 ## 🔄 UPDATE OR REINSTALL
 
 Use these commands if DVSwitch Cockpit is already installed from GitHub:
@@ -392,6 +402,20 @@ To clear Cockpit's callsign cache:
 ```bash
 sudo rm -f /tmp/dvswitch_cockpit_dmr_subscribers.json
 ```
+
+### Subscriber database protection
+
+Cockpit protects itself from failed or partial DVSwitch subscriber database updates.
+
+If `/var/lib/dvswitch/subscriber_ids.csv` is missing, tiny, or invalid, Cockpit will not rebuild its callsign cache from that bad file. When possible, it keeps using a last-known-good fallback copy instead:
+
+```text
+/var/cache/dvswitch-cockpit/subscriber_ids.lastgood.csv
+```
+
+This helps prevent QRZ/callsign links from disappearing just because a DVSwitch database update temporarily failed.
+
+The setup script creates the cache directory and gives the web server permission to use it.
 
 ---
 

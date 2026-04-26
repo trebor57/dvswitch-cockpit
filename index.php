@@ -1,4 +1,7 @@
-<?php declare(strict_types=1); ?>
+<?php declare(strict_types=1);
+$dvcVersion = trim((string)@file_get_contents(__DIR__ . '/VERSION'));
+if ($dvcVersion === '') { $dvcVersion = '0.0.0'; }
+?>
 <!doctype html>
 <html lang="en">
 <head>
@@ -10,7 +13,7 @@
 <body>
   <header class="top-header">
     <div class="title-wrap">
-      <h1>DVSwitch Cockpit</h1>
+      <h1 class="app-title">DVSwitch Cockpit <a id="update-bolt" class="update-bolt" href="https://github.com/TerryClaiborne/dvswitch-cockpit" target="_blank" rel="noopener noreferrer" data-current-version="<?= htmlspecialchars($dvcVersion, ENT_QUOTES) ?>" title="" aria-label="DVSwitch Cockpit update available">⚡</a></h1>
       <p>Modern dashboard for AllStarLink 3 / DVSwitch</p>
     </div>
   </header>

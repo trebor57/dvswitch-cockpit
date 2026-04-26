@@ -34,6 +34,32 @@ function dc_merge_prefer_useful_row(array $preferred, array $fallback): array {
     return $preferred;
 }
 
+function dc_history_row_is_local(array $row): bool {
+    return strtoupper((string)($row['src'] ?? '')) === 'LNET';
+}
+
+function dc_history_dedupe_local_rows(array $rows): array {
+    $seen = [];
+    $out = [];
+    foreach ($rows as $row) {
+        if (dc_history_row_is_local($row)) {
+            $key = implode('|', [
+                (string)($row['utc'] ?? ''),
+                (string)($row['mode'] ?? ''),
+                (string)($row['callsign'] ?? ''),
+                (string)($row['src'] ?? ''),
+                (string)($row['dur'] ?? ''),
+            ]);
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+        }
+        $out[] = $row;
+    }
+    return $out;
+}
+
 function dc_merge_history(array $existing, array $current): array {
     $map = [];
     foreach (array_merge($current, $existing) as $row) {
@@ -53,6 +79,7 @@ function dc_merge_history(array $existing, array $current): array {
     }
     $rows = array_values($map);
     usort($rows, fn($a,$b) => strcmp((string)($b['utc'] ?? ''), (string)($a['utc'] ?? '')));
+    $rows = dc_history_dedupe_local_rows($rows);
     return array_slice($rows, 0, 120);
 }
 function dc_load_state_cache(): array {

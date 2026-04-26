@@ -5,6 +5,7 @@ APP_NAME="DVSwitch Cockpit"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST_DIR="${DEST_DIR:-/var/www/html/dvswitch_cockpit}"
 SUDOERS_FILE="${SUDOERS_FILE:-/etc/sudoers.d/dvswitch-cockpit-services}"
+CACHE_DIR="${CACHE_DIR:-/var/cache/dvswitch-cockpit}"
 WEB_USER="${WEB_USER:-www-data}"
 WEB_GROUP="${WEB_GROUP:-www-data}"
 
@@ -98,11 +99,14 @@ fi
 
 echo
 echo "[3/6] Applying ownership and permissions..."
+mkdir -p "$CACHE_DIR"
 if id "$WEB_USER" >/dev/null 2>&1; then
   chown -R "$WEB_USER:$WEB_GROUP" "$DEST_DIR" || true
+  chown -R "$WEB_USER:$WEB_GROUP" "$CACHE_DIR" || true
 else
   echo "Warning: web user '$WEB_USER' not found; ownership unchanged."
 fi
+chmod 0755 "$CACHE_DIR" || true
 
 find "$DEST_DIR" -type d -exec chmod 0755 {} +
 find "$DEST_DIR" -type f -exec chmod 0644 {} +
@@ -132,6 +136,7 @@ echo
 echo "[6/6] Setup summary"
 echo "Install path: $DEST_DIR"
 echo "Sudoers:     $SUDOERS_FILE"
+echo "Cache dir:   $CACHE_DIR"
 echo
 echo "Open:"
 echo "  http://<node-ip>/dvswitch_cockpit/"
@@ -141,5 +146,6 @@ echo "  - Cockpit reads runtime state only."
 echo "  - It does not perform BM/TGIF/YSF connect or disconnect actions."
 echo "  - Restart buttons are limited to Analog_Bridge and MMDVM_Bridge."
 echo "  - DMR callsign lookup uses the existing DVSwitch subscriber database when available."
+echo "  - A last-known-good subscriber fallback is kept in $CACHE_DIR when possible."
 echo
 echo "Setup complete."

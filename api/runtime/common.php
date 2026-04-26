@@ -158,6 +158,22 @@ function dc_dmr_subscriber_cache_path(): string {
     return '/tmp/dvswitch_cockpit_dmr_subscribers.json';
 }
 
+function dc_dmr_subscriber_cache_dir(): string {
+    return '/var/cache/dvswitch-cockpit';
+}
+
+function dc_dmr_subscriber_lastgood_path(): string {
+    return dc_dmr_subscriber_cache_dir() . '/subscriber_ids.lastgood.csv';
+}
+
+function dc_dmr_min_valid_rows(): int {
+    return 1000;
+}
+
+function dc_dmr_min_valid_bytes(): int {
+    return 1024 * 1024;
+}
+
 function dc_find_header_index(array $header, array $needles): int {
     foreach ($header as $idx => $field) {
         $field = strtolower(trim((string)$field));
@@ -169,94 +185,197 @@ function dc_find_header_index(array $header, array $needles): int {
     return -1;
 }
 
+function dc_parse_dmr_subscriber_file(string $file, int $maxRows = 0): array {
+    $map = [];
+    if ($file === '' || !is_readable($file)) return $map;
+
+    $fh = @fopen($file, 'r');
+    if (!$fh) return $map;
+
+    $idIndex = -1;
+    $callIndex = -1;
+    $lineNo = 0;
+    while (($row = fgetcsv($fh)) !== false) {
+        $lineNo++;
+        if ($maxRows > 0 && $lineNo > $maxRows) break;
+        if (!is_array($row) || count($row) < 2) continue;
+        $row[0] = preg_replace('/^\xEF\xBB\xBF/', '', (string)$row[0]) ?? (string)$row[0];
+
+        if ($lineNo === 1) {
+            $lower = array_map(fn($x) => strtolower(trim((string)$x)), $row);
+            $looksHeader = false;
+            foreach ($lower as $field) {
+                if (preg_match('/^(radio[_ ]?id|dmr[_ ]?id|id|callsign|call)$/i', $field)) {
+                    $looksHeader = true;
+                    break;
+                }
+            }
+            if ($looksHeader && !preg_match('/^[0-9]{4,9}$/', trim((string)$row[0]))) {
+                $idIndex = dc_find_header_index($row, ['radioid','dmrid','subscriberid','id']);
+                $callIndex = dc_find_header_index($row, ['callsign','call']);
+                continue;
+            }
+        }
+
+        $id = '';
+        $call = '';
+        if ($idIndex >= 0 && $callIndex >= 0 && isset($row[$idIndex], $row[$callIndex])) {
+            $id = preg_replace('/\D+/', '', (string)$row[$idIndex]) ?? '';
+            $call = strtoupper(trim((string)$row[$callIndex]));
+        } else {
+            $id = preg_replace('/\D+/', '', (string)$row[0]) ?? '';
+            $call = strtoupper(trim((string)$row[1]));
+            if (!preg_match('/^[0-9]{4,9}$/', $id) || !dc_is_callsign_like($call)) {
+                $id = '';
+                $call = '';
+                foreach ($row as $field) {
+                    $candidateId = preg_replace('/\D+/', '', (string)$field) ?? '';
+                    if ($id === '' && preg_match('/^[0-9]{4,9}$/', $candidateId)) {
+                        $id = $candidateId;
+                        continue;
+                    }
+                    $candidateCall = strtoupper(trim((string)$field));
+                    if ($call === '' && dc_is_callsign_like($candidateCall)) {
+                        $call = $candidateCall;
+                    }
+                }
+            }
+        }
+
+        if (preg_match('/^[0-9]{4,9}$/', $id) && dc_is_callsign_like($call)) {
+            $map[$id] = $call;
+        }
+    }
+    fclose($fh);
+    return $map;
+}
+
+function dc_validate_dmr_subscriber_file(string $file): array {
+    if ($file === '' || !is_readable($file)) {
+        return ['valid' => false, 'reason' => 'missing_or_unreadable', 'size' => 0, 'sample_count' => 0];
+    }
+
+    $size = (int)(@filesize($file) ?: 0);
+    if ($size < dc_dmr_min_valid_bytes()) {
+        return ['valid' => false, 'reason' => 'suspiciously_small', 'size' => $size, 'sample_count' => 0];
+    }
+
+    $sample = dc_parse_dmr_subscriber_file($file, 5000);
+    $sampleCount = count($sample);
+    if ($sampleCount < dc_dmr_min_valid_rows()) {
+        return ['valid' => false, 'reason' => 'too_few_valid_rows', 'size' => $size, 'sample_count' => $sampleCount];
+    }
+
+    return ['valid' => true, 'reason' => 'ok', 'size' => $size, 'sample_count' => $sampleCount];
+}
+
+function dc_load_cached_dmr_subscriber_map(bool $allowStale = false): array {
+    $cacheFile = dc_dmr_subscriber_cache_path();
+    if (!is_readable($cacheFile)) return [];
+    $cached = json_decode((string)@file_get_contents($cacheFile), true);
+    if (!is_array($cached) || !isset($cached['map']) || !is_array($cached['map'])) return [];
+    $count = (int)($cached['count'] ?? count($cached['map']));
+    if ($allowStale && $count >= dc_dmr_min_valid_rows()) return $cached;
+    return $cached;
+}
+
+function dc_save_dmr_subscriber_cache(string $signature, string $source, array $map, array $health): void {
+    if (count($map) < dc_dmr_min_valid_rows()) return;
+    @file_put_contents(dc_dmr_subscriber_cache_path(), json_encode([
+        'signature' => $signature,
+        'source' => $source,
+        'count' => count($map),
+        'health' => $health,
+        'created_at' => gmdate('c'),
+        'map' => $map,
+    ], JSON_PRETTY_PRINT));
+}
+
+function dc_save_lastgood_subscriber_file(string $file): void {
+    if ($file === '' || !is_readable($file)) return;
+    $dir = dc_dmr_subscriber_cache_dir();
+    if (!is_dir($dir)) @mkdir($dir, 0755, true);
+    if (is_dir($dir) && is_writable($dir)) {
+        @copy($file, dc_dmr_subscriber_lastgood_path());
+        @chmod(dc_dmr_subscriber_lastgood_path(), 0644);
+    }
+}
+
 function dc_load_dmr_subscriber_map(): array {
     static $loaded = null;
     if (is_array($loaded)) return $loaded;
 
     $file = dc_detect_subscriber_file();
-    if ($file === '' || !is_readable($file)) {
-        $loaded = ['source' => '', 'map' => []];
+    $cacheFile = dc_dmr_subscriber_cache_path();
+    $lastGood = dc_dmr_subscriber_lastgood_path();
+    $health = dc_validate_dmr_subscriber_file($file);
+
+    if (($health['valid'] ?? false) === true) {
+        $sig = $file . '|' . (string)(@filemtime($file) ?: 0) . '|' . (string)(@filesize($file) ?: 0);
+        if (is_readable($cacheFile)) {
+            $cached = json_decode((string)@file_get_contents($cacheFile), true);
+            if (is_array($cached) && ($cached['signature'] ?? '') === $sig && isset($cached['map']) && is_array($cached['map']) && (int)($cached['count'] ?? count($cached['map'])) >= dc_dmr_min_valid_rows()) {
+                $loaded = ['source' => $file, 'map' => $cached['map'], 'health' => $health + ['cache' => 'fresh']];
+                return $loaded;
+            }
+        }
+
+        $map = dc_parse_dmr_subscriber_file($file);
+        if (count($map) >= dc_dmr_min_valid_rows()) {
+            dc_save_dmr_subscriber_cache($sig, $file, $map, $health);
+            dc_save_lastgood_subscriber_file($file);
+            $loaded = ['source' => $file, 'map' => $map, 'health' => $health + ['cache' => 'rebuilt']];
+            return $loaded;
+        }
+        $health = ['valid' => false, 'reason' => 'parse_count_too_low', 'size' => (int)(@filesize($file) ?: 0), 'sample_count' => count($map)];
+    }
+
+    // If DVSwitch temporarily leaves subscriber_ids.csv tiny/corrupt during an
+    // update, keep using the last known good Cockpit cache instead of poisoning
+    // callsign lookup with a bad rebuild.
+    $cached = dc_load_cached_dmr_subscriber_map(true);
+    if (isset($cached['map']) && is_array($cached['map'])) {
+        $loaded = ['source' => (string)($cached['source'] ?? 'cache'), 'map' => $cached['map'], 'health' => $health + ['cache' => 'stale_used']];
         return $loaded;
     }
 
-    $sig = $file . '|' . (string)(@filemtime($file) ?: 0) . '|' . (string)(@filesize($file) ?: 0);
-    $cacheFile = dc_dmr_subscriber_cache_path();
-    if (is_readable($cacheFile)) {
-        $cached = json_decode((string)@file_get_contents($cacheFile), true);
-        if (is_array($cached) && ($cached['signature'] ?? '') === $sig && isset($cached['map']) && is_array($cached['map'])) {
-            $loaded = ['source' => $file, 'map' => $cached['map']];
-            return $loaded;
+    if (is_readable($lastGood)) {
+        $lastGoodHealth = dc_validate_dmr_subscriber_file($lastGood);
+        if (($lastGoodHealth['valid'] ?? false) === true) {
+            $map = dc_parse_dmr_subscriber_file($lastGood);
+            if (count($map) >= dc_dmr_min_valid_rows()) {
+                $sig = $lastGood . '|' . (string)(@filemtime($lastGood) ?: 0) . '|' . (string)(@filesize($lastGood) ?: 0);
+                dc_save_dmr_subscriber_cache($sig, $lastGood, $map, $lastGoodHealth + ['fallback' => true]);
+                $loaded = ['source' => $lastGood, 'map' => $map, 'health' => $health + ['cache' => 'lastgood_used']];
+                return $loaded;
+            }
         }
     }
 
-    $map = [];
-    $fh = @fopen($file, 'r');
-    if ($fh) {
-        $idIndex = -1;
-        $callIndex = -1;
-        $lineNo = 0;
-        while (($row = fgetcsv($fh)) !== false) {
-            $lineNo++;
-            if (!is_array($row) || count($row) < 2) continue;
-            $row[0] = preg_replace('/^\xEF\xBB\xBF/', '', (string)$row[0]) ?? (string)$row[0];
-
-            if ($lineNo === 1) {
-                $lower = array_map(fn($x) => strtolower(trim((string)$x)), $row);
-                $looksHeader = false;
-                foreach ($lower as $field) {
-                    if (preg_match('/^(radio[_ ]?id|dmr[_ ]?id|id|callsign|call)$/i', $field)) {
-                        $looksHeader = true;
-                        break;
-                    }
-                }
-                if ($looksHeader && !preg_match('/^[0-9]{4,9}$/', trim((string)$row[0]))) {
-                    $idIndex = dc_find_header_index($row, ['radioid','dmrid','subscriberid','id']);
-                    $callIndex = dc_find_header_index($row, ['callsign','call']);
-                    continue;
-                }
-            }
-
-            $id = '';
-            $call = '';
-            if ($idIndex >= 0 && $callIndex >= 0 && isset($row[$idIndex], $row[$callIndex])) {
-                $id = preg_replace('/\D+/', '', (string)$row[$idIndex]) ?? '';
-                $call = strtoupper(trim((string)$row[$callIndex]));
-            } else {
-                $id = preg_replace('/\D+/', '', (string)$row[0]) ?? '';
-                $call = strtoupper(trim((string)$row[1]));
-                if (!preg_match('/^[0-9]{4,9}$/', $id) || !dc_is_callsign_like($call)) {
-                    $id = '';
-                    $call = '';
-                    foreach ($row as $field) {
-                        $candidateId = preg_replace('/\D+/', '', (string)$field) ?? '';
-                        if ($id === '' && preg_match('/^[0-9]{4,9}$/', $candidateId)) {
-                            $id = $candidateId;
-                            continue;
-                        }
-                        $candidateCall = strtoupper(trim((string)$field));
-                        if ($call === '' && dc_is_callsign_like($candidateCall)) {
-                            $call = $candidateCall;
-                        }
-                    }
-                }
-            }
-
-            if (preg_match('/^[0-9]{4,9}$/', $id) && dc_is_callsign_like($call)) {
-                $map[$id] = $call;
-            }
-        }
-        fclose($fh);
-    }
-
-    @file_put_contents($cacheFile, json_encode([
-        'signature' => $sig,
-        'source' => $file,
-        'count' => count($map),
-        'map' => $map,
-    ], JSON_PRETTY_PRINT));
-
-    $loaded = ['source' => $file, 'map' => $map];
+    $loaded = ['source' => $file, 'map' => [], 'health' => $health + ['cache' => 'none']];
     return $loaded;
+}
+
+function dc_display_station_call(string $rawCall, string $gateway = ''): string {
+    $rawCall = trim($rawCall);
+    $gateway = preg_replace('/\D+/', '', trim($gateway)) ?? '';
+    if ($rawCall === '' || $rawCall === '--') {
+        if ($gateway !== '') {
+            $lookup = dc_lookup_dmr_callsign($gateway);
+            if ($lookup !== '') return $lookup;
+            return $gateway;
+        }
+        return '--';
+    }
+    if (preg_match('/^[0-9]{4,9}$/', $rawCall)) {
+        $lookup = dc_lookup_dmr_callsign($rawCall);
+        if ($lookup !== '') return $lookup;
+        if ($gateway !== '' && $rawCall === $gateway) {
+            $gatewayLookup = dc_lookup_dmr_callsign($gateway);
+            if ($gatewayLookup !== '') return $gatewayLookup;
+        }
+    }
+    return $rawCall;
 }
 
 function dc_lookup_dmr_callsign(string $id): string {

@@ -142,8 +142,51 @@ async function serviceAction(btn){
     btn.disabled=false
   }
 }
+
+function versionParts(v){
+  return String(v||'0.0.0').trim().split('.').map(x=>parseInt(x.replace(/[^0-9].*$/,''),10)||0)
+}
+function isRemoteVersionNewer(local,remote){
+  const l=versionParts(local), r=versionParts(remote)
+  const n=Math.max(l.length,r.length,3)
+  for(let i=0;i<n;i++){
+    const a=l[i]||0, b=r[i]||0
+    if(b>a)return true
+    if(b<a)return false
+  }
+  return false
+}
+async function checkForUpdate(){
+  const bolt=document.getElementById('update-bolt')
+  if(!bolt)return
+  const local=(bolt.getAttribute('data-current-version')||'').trim()
+  if(!local)return
+  const controller=window.AbortController?new AbortController():null
+  const timer=controller?setTimeout(()=>controller.abort(),3500):null
+  try{
+    const url='https://raw.githubusercontent.com/TerryClaiborne/dvswitch-cockpit/main/VERSION?_='+Date.now()
+    const r=await fetch(url,{cache:'no-store',signal:controller?controller.signal:undefined})
+    if(!r.ok)throw new Error('version check unavailable')
+    const remote=(await r.text()).trim()
+    if(isRemoteVersionNewer(local,remote)){
+      bolt.classList.add('update-available')
+      bolt.title=`Update available: ${local} → ${remote}`
+      bolt.setAttribute('aria-label',`DVSwitch Cockpit update available: ${local} to ${remote}`)
+    }else{
+      bolt.classList.remove('update-available')
+      bolt.title='DVSwitch Cockpit is up to date'
+    }
+  }catch(e){
+    bolt.classList.remove('update-available')
+    bolt.title=''
+  }finally{
+    if(timer)clearTimeout(timer)
+  }
+}
+
 document.addEventListener('DOMContentLoaded',function(){
   refresh()
+  checkForUpdate()
   setInterval(refresh,5000)
   document.querySelectorAll('[data-service-action]').forEach(b=>b.addEventListener('click',()=>serviceAction(b)))
 })

@@ -1,3 +1,7 @@
+.gitignore
+.htaccess
+README.md
+VERSION
 api/runtime/adapters/BmStfuAdapter.php
 api/runtime/adapters/BmStockAdapter.php
 api/runtime/adapters/GenericAdapter.php
@@ -13,15 +17,11 @@ docs/GITHUB_READY.md
 docs/INSTALL.md
 docs/PROJECT_NOTES.md
 docs/RECOVERY_NOTES.md
-.gitignore
-.htaccess
 includes/system_ribbon.php
 index.html
 index.php
-README.md
 screenshot.png
 setup_dvswitch_cockpit.sh
 static/app.css
 static/app.js
 systemd/sudoers.dvswitch-cockpit-example
-VERSION

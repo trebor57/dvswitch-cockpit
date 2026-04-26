@@ -13,8 +13,9 @@ function dc_tgif_should_hide_net_identity(string $src, string $dst, string $gate
     $gateway = preg_replace('/\D+/', '', $gateway) ?? '';
     $target = preg_replace('/\D+/', '', $target) ?? '';
 
-    // Keep parrot readable.
-    if ($target === '9990' || $src === '9990' || $dst === '9990') return false;
+    // Do not special-case TGIF parrot here.
+    // Non-local TGIF Net RX identity is still untrusted.
+    // Local keyups are handled separately and still show the local station.
 
     // For non-parrot TGIF network RX, the backend may expose an upstream/gateway
     // identity instead of the true speaker. Keep the RX event and target visible,
@@ -61,7 +62,7 @@ function dc_tgif_active_mmdvm_path(): array {
 
     if (in_array($out['address'], ['127.0.0.1', 'localhost'], true) && $out['port'] === '62033') {
         $out['mode'] = 'hblink';
-    } elseif (str_contains($out['address'], 'tgif.network') || $out['port'] === '62031') {
+    } elseif (str_contains($out['address'], 'tgif.network')) {
         $out['mode'] = 'direct_tgif';
     }
 

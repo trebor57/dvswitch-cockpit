@@ -82,6 +82,62 @@ function dc_merge_history(array $existing, array $current): array {
     $rows = dc_history_dedupe_local_rows($rows);
     return array_slice($rows, 0, 120);
 }
+function dc_history_display_rows(array $rows, int $limit = 16): array {
+    usort($rows, fn($a,$b) => strcmp((string)($b['utc'] ?? ''), (string)($a['utc'] ?? '')));
+
+    $out = [];
+    $used = [];
+    $perModeLimit = 6;
+
+    foreach ($rows as $idx => $row) {
+        $mode = (string)($row['mode'] ?? 'unknown');
+        $used[$mode] = $used[$mode] ?? 0;
+
+        if ($used[$mode] >= $perModeLimit) {
+            continue;
+        }
+
+        $out[] = $row;
+        $used[$mode]++;
+        if (count($out) >= $limit) {
+            return $out;
+        }
+    }
+
+    foreach ($rows as $row) {
+        if (count($out) >= $limit) break;
+
+        $key = implode('|', [
+            (string)($row['utc'] ?? ''),
+            (string)($row['mode'] ?? ''),
+            (string)($row['callsign'] ?? ''),
+            (string)($row['target'] ?? ''),
+            (string)($row['src'] ?? ''),
+        ]);
+
+        $already = false;
+        foreach ($out as $existing) {
+            $existingKey = implode('|', [
+                (string)($existing['utc'] ?? ''),
+                (string)($existing['mode'] ?? ''),
+                (string)($existing['callsign'] ?? ''),
+                (string)($existing['target'] ?? ''),
+                (string)($existing['src'] ?? ''),
+            ]);
+            if ($existingKey === $key) {
+                $already = true;
+                break;
+            }
+        }
+
+        if (!$already) {
+            $out[] = $row;
+        }
+    }
+
+    return array_slice($out, 0, $limit);
+}
+
 function dc_load_state_cache(): array {
     $f = dc_state_cache_path();
     if (!is_readable($f)) return [];

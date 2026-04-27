@@ -195,7 +195,7 @@ echo json_encode([
     'connection_state' => $active['connection_state'] ?? 'Idle',
     'last_heard' => $active['last_heard'] ?? '--',
     'services' => $services,
-    'gateway_activity' => array_slice($history['rows'] ?? [], 0, 16),
+    'gateway_activity' => dc_history_display_rows($history['rows'] ?? [], 16),
     'local_activity' => [],
     'recent_events' => $recentEvents,
     'vocoder_label' => $vocoderLabel,

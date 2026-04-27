@@ -6,6 +6,7 @@ SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST_DIR="${DEST_DIR:-/var/www/html/dvswitch_cockpit}"
 SUDOERS_FILE="${SUDOERS_FILE:-/etc/sudoers.d/dvswitch-cockpit-services}"
 CACHE_DIR="${CACHE_DIR:-/var/cache/dvswitch-cockpit}"
+APACHE_CONF_FILE="${APACHE_CONF_FILE:-/etc/apache2/conf-available/dvswitch-cockpit-security.conf}"
 WEB_USER="${WEB_USER:-www-data}"
 WEB_GROUP="${WEB_GROUP:-www-data}"
 
@@ -21,7 +22,7 @@ echo "Source:      $SRC_DIR"
 echo "Destination: $DEST_DIR"
 echo
 
-echo "[1/6] Checking basic packages..."
+echo "[1/7] Checking basic packages..."
 if command -v apt-get >/dev/null 2>&1; then
   NEED_PKGS=()
   command -v apache2 >/dev/null 2>&1 || NEED_PKGS+=(apache2)
@@ -40,7 +41,7 @@ else
 fi
 
 echo
-echo "[2/6] Preparing destination..."
+echo "[2/7] Preparing destination..."
 mkdir -p "$DEST_DIR"
 
 SRC_REAL="$(realpath "$SRC_DIR")"
@@ -98,7 +99,7 @@ else
 fi
 
 echo
-echo "[3/6] Applying ownership and permissions..."
+echo "[3/7] Applying ownership and permissions..."
 mkdir -p "$CACHE_DIR"
 if id "$WEB_USER" >/dev/null 2>&1; then
   chown -R "$WEB_USER:$WEB_GROUP" "$DEST_DIR" || true
@@ -113,7 +114,7 @@ find "$DEST_DIR" -type f -exec chmod 0644 {} +
 chmod 0755 "$DEST_DIR/setup_dvswitch_cockpit.sh" 2>/dev/null || true
 
 echo
-echo "[4/6] Installing sudoers rule..."
+echo "[4/7] Installing sudoers rule..."
 cat > "$SUDOERS_FILE" <<EOF_SUDOERS
 # Managed by setup_dvswitch_cockpit.sh
 # Allows the DVSwitch Cockpit web UI to restart DVSwitch services
@@ -125,7 +126,36 @@ chmod 0440 "$SUDOERS_FILE"
 visudo -cf "$SUDOERS_FILE"
 
 echo
-echo "[5/6] Reloading Apache if available..."
+echo "[5/7] Installing Apache access-control config if available..."
+if [[ -d /etc/apache2/conf-available ]]; then
+  cat > "$APACHE_CONF_FILE" <<EOF_APACHE
+# Managed by setup_dvswitch_cockpit.sh
+# DVSwitch Cockpit is intended for local/trusted network access only.
+<Directory "$DEST_DIR">
+    Options -Indexes
+    AllowOverride All
+    Require ip 127.0.0.1 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10 fc00::/7 fe80::/10
+    <FilesMatch "(^\.|~$|\.(bak|old|orig|tmp|swp|swo|log|zip|tar|tgz|gz|patch|b64|ini|cfg|yml|yaml|csv|sqlite|db|md|txt|sh)$)">
+        Require all denied
+    </FilesMatch>
+    <FilesMatch "^(VERSION|tree\.txt|config\.ini|subscriber_ids\.csv|ABInfo_.*\.json)$">
+        Require all denied
+    </FilesMatch>
+</Directory>
+
+<DirectoryMatch "^$DEST_DIR/(\.git|\.github|docs|systemd|tools|templates|includes|api/runtime)(/|$)">
+    Require all denied
+</DirectoryMatch>
+EOF_APACHE
+  if command -v a2enconf >/dev/null 2>&1; then
+    a2enconf dvswitch-cockpit-security >/dev/null || true
+  fi
+else
+  echo "Apache conf-available not found; .htaccess and PHP guards still apply."
+fi
+
+echo
+echo "[6/7] Reloading Apache if available..."
 if systemctl list-unit-files apache2.service >/dev/null 2>&1; then
   systemctl reload apache2 || systemctl restart apache2 || true
 else
@@ -133,10 +163,11 @@ else
 fi
 
 echo
-echo "[6/6] Setup summary"
+echo "[7/7] Setup summary"
 echo "Install path: $DEST_DIR"
 echo "Sudoers:     $SUDOERS_FILE"
 echo "Cache dir:   $CACHE_DIR"
+echo "Apache conf: $APACHE_CONF_FILE"
 echo
 echo "Open:"
 echo "  http://<node-ip>/dvswitch_cockpit/"

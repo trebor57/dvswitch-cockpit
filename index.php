@@ -1,4 +1,6 @@
 <?php declare(strict_types=1);
+require __DIR__ . '/api/security.php';
+dc_security_require_trusted_client();
 $dvcVersion = trim((string)@file_get_contents(__DIR__ . '/VERSION'));
 if ($dvcVersion === '') { $dvcVersion = '0.0.0'; }
 ?>

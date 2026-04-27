@@ -121,7 +121,7 @@ async function serviceAction(btn){
     const body=new URLSearchParams()
     body.set('action',action)
     body.set('service',service)
-    const r=await fetch('api/service_action.php',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body.toString()})
+    const r=await fetch('api/service_action.php',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-DVSwitch-Cockpit':'service-action'},body:body.toString()})
     const d=await r.json()
     if(!r.ok||!d.ok)throw new Error(d.error||'Service action failed')
     if(status){

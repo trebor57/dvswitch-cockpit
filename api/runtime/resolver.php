@@ -17,6 +17,7 @@ function dc_resolve_active(array $abinfo, array $adapters, array &$stateCache = 
     $bmStfu  = $adapters['bm_stfu']      ?? dc_idle_adapter('BrandMeister');
     $bmStock = $adapters['bm_stock']     ?? dc_idle_adapter('BrandMeister');
     $ysf     = $adapters['ysf']          ?? dc_idle_adapter('YSF');
+    $dstar   = $adapters['dstar']        ?? dc_idle_adapter('D-Star');
     $tgif    = $adapters['tgif_hblink']  ?? dc_idle_adapter('TGIF');
     $generic = $adapters['generic']      ?? dc_idle_adapter('Idle');
 
@@ -25,6 +26,9 @@ function dc_resolve_active(array $abinfo, array $adapters, array &$stateCache = 
     }
     if (!str_starts_with($liveMode, 'YSF')) {
         unset($stateCache['ysf']);
+    }
+    if ($liveMode !== 'DSTAR') {
+        unset($stateCache['dstar']);
     }
     if ($liveMode !== 'DMR') {
         unset($stateCache['bm_stock'], $stateCache['tgif_hblink']);
@@ -36,6 +40,10 @@ function dc_resolve_active(array $abinfo, array $adapters, array &$stateCache = 
 
     if (str_starts_with($liveMode, 'YSF')) {
         return dc_adapter_is_connected($ysf) ? $ysf : dc_idle_adapter('Idle');
+    }
+
+    if ($liveMode === 'DSTAR') {
+        return dc_adapter_is_connected($dstar) ? $dstar : dc_idle_adapter('Idle');
     }
 
     if ($liveMode === 'DMR') {

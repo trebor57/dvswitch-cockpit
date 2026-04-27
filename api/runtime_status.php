@@ -10,6 +10,7 @@ header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 require __DIR__ . '/runtime/common.php';
 require __DIR__ . '/runtime/history.php';
 require __DIR__ . '/runtime/adapters/YsfAdapter.php';
+require __DIR__ . '/runtime/adapters/DstarAdapter.php';
 require __DIR__ . '/runtime/adapters/BmStfuAdapter.php';
 require __DIR__ . '/runtime/adapters/BmStockAdapter.php';
 require __DIR__ . '/runtime/adapters/TgifHblinkAdapter.php';
@@ -81,12 +82,13 @@ $abinfo['_runtime'] = [
 
 $adapters = [];
 $adapters['ysf']         = dc_adapter_ysf($bridgeLines, $abinfo, $cache, $tzName);
+$adapters['dstar']       = dc_adapter_dstar($bridgeLines, $abinfo, $cache, $tzName);
 $adapters['bm_stfu']     = dc_adapter_bm_stfu($stfuLines, $abinfo, $cache, $tzName);
 $adapters['bm_stock']    = dc_adapter_bm_stock($analogLines, $abinfo, $services, $cache, $tzName);
 $adapters['tgif_hblink'] = dc_adapter_tgif_hblink($analogLines, $abinfo, $services, $tzName);
 $adapters['generic']     = dc_adapter_generic($bridgeLines, $tzName);
 
-foreach (['ysf','bm_stfu','bm_stock','tgif_hblink','generic'] as $name) {
+foreach (['ysf','dstar','bm_stfu','bm_stock','tgif_hblink','generic'] as $name) {
     if (!isset($adapters[$name]) || !is_array($adapters[$name])) {
         $adapters[$name] = dc_idle_adapter('Idle');
     }
@@ -117,6 +119,11 @@ dc_save_state_cache([
         'target_display'   => $adapters['ysf']['target_display'] ?? '--',
         'last_heard'       => $adapters['ysf']['last_heard'] ?? '--',
     ],
+    'dstar' => [
+        'connection_state' => $adapters['dstar']['connection_state'] ?? 'Idle',
+        'target_display'   => $adapters['dstar']['target_display'] ?? '--',
+        'last_heard'       => $adapters['dstar']['last_heard'] ?? '--',
+    ],
     'bm_stfu' => [
         'connection_state' => $adapters['bm_stfu']['connection_state'] ?? 'Idle',
         'target_display'   => $adapters['bm_stfu']['target_display'] ?? '--',
@@ -136,6 +143,7 @@ dc_save_state_cache([
 
 $historyRows = array_merge(
     is_array($adapters['ysf']['rows'] ?? null) ? $adapters['ysf']['rows'] : [],
+    is_array($adapters['dstar']['rows'] ?? null) ? $adapters['dstar']['rows'] : [],
     is_array($adapters['bm_stfu']['rows'] ?? null) ? $adapters['bm_stfu']['rows'] : [],
     is_array($adapters['bm_stock']['rows'] ?? null) ? $adapters['bm_stock']['rows'] : [],
     is_array($adapters['tgif_hblink']['rows'] ?? null) ? $adapters['tgif_hblink']['rows'] : [],

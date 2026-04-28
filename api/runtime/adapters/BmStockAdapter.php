@@ -7,6 +7,7 @@ function dc_adapter_bm_stock(array $analogLines, array $abinfo, array $services,
     $lastHeard = '--';
     $lastSignal = 0;
     $lastIdx = null;
+    $analogMode = '';
 
     $liveMode = strtoupper((string)($abinfo['tlv']['ambe_mode'] ?? ''));
     $gateway = trim((string)($abinfo['digital']['gw'] ?? ''));
@@ -36,6 +37,18 @@ function dc_adapter_bm_stock(array $analogLines, array $abinfo, array $services,
     foreach ($analogLines as $line) {
         $stamp = dc_parse_log_dt($line, $tzName);
         $epoch = (int)($stamp['epoch'] ?? 0);
+
+        if (preg_match('/Setting mode to\s+([A-Z0-9_]+)/i', $line, $modeMatch)) {
+            $analogMode = strtoupper(trim($modeMatch[1]));
+        } elseif (preg_match('/ambeMode\s*=\s*([A-Z0-9_]+)/i', $line, $modeMatch)) {
+            $analogMode = strtoupper(trim($modeMatch[1]));
+        }
+
+        $isDmrAnalogLine = ($analogMode === '' && $liveMode === 'DMR') || $analogMode === 'DMR';
+
+        if (!$isDmrAnalogLine) {
+            continue;
+        }
 
         if (preg_match('/EVENT:\s+\{"topic":"dvswitch\/MMDVM_Bridge\/DMR","message":"login success"\}/', $line)) {
             $lastSignal = max($lastSignal, $epoch);

@@ -82,7 +82,44 @@ function dc_merge_history(array $existing, array $current): array {
     $rows = dc_history_dedupe_local_rows($rows);
     return array_slice($rows, 0, 120);
 }
+function dc_history_duplicate_key(array $row): string {
+    $station = (string)($row['callsign_display'] ?? ($row['callsign'] ?? ''));
+    return implode('|', [
+        (string)($row['utc'] ?? ''),
+        trim($station),
+        (string)($row['target'] ?? ''),
+        (string)($row['src'] ?? ''),
+    ]);
+}
+
+function dc_history_remove_cross_mode_duplicates(array $rows): array {
+    $digitalKeys = [];
+
+    foreach ($rows as $row) {
+        $mode = (string)($row['mode'] ?? '');
+        if ($mode === 'NXDN' || $mode === 'P25') {
+            $digitalKeys[dc_history_duplicate_key($row)] = true;
+        }
+    }
+
+    if (!$digitalKeys) {
+        return $rows;
+    }
+
+    $out = [];
+    foreach ($rows as $row) {
+        $mode = (string)($row['mode'] ?? '');
+        if ($mode === 'DMR/BM' && isset($digitalKeys[dc_history_duplicate_key($row)])) {
+            continue;
+        }
+        $out[] = $row;
+    }
+
+    return $out;
+}
+
 function dc_history_display_rows(array $rows, int $limit = 16): array {
+    $rows = dc_history_remove_cross_mode_duplicates($rows);
     usort($rows, fn($a,$b) => strcmp((string)($b['utc'] ?? ''), (string)($a['utc'] ?? '')));
 
     $out = [];

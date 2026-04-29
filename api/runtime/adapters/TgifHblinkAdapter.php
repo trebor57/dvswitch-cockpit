@@ -102,6 +102,142 @@ function dc_tgif_find_session_start(array $analogLines, string $tzName): int {
     return $lastDmrStart;
 }
 
+
+function dc_tgif_activity_stamp_from_ts($ts, string $tzName): array {
+    try {
+        $epoch = (int)floor((float)$ts);
+        $utcDt = (new DateTimeImmutable('@' . $epoch))->setTimezone(new DateTimeZone('UTC'));
+        $localDt = $utcDt->setTimezone(new DateTimeZone($tzName));
+        return [
+            'epoch' => $epoch,
+            'utc' => $utcDt->format('Y-m-d H:i:s'),
+            'display' => $localDt->format('H:i:s M d'),
+        ];
+    } catch (Throwable $e) {
+        return ['epoch' => 0, 'utc' => '', 'display' => '--'];
+    }
+}
+
+function dc_tgif_activity_station(array $event, string $target): array {
+    $alias = trim((string)($event['src_alias'] ?? ''));
+    $srcId = trim((string)($event['src_id'] ?? ''));
+    $targetDigits = dc_tgif_digits($target);
+    $srcDigits = dc_tgif_digits($srcId !== '' ? $srcId : $alias);
+
+    if ($targetDigits !== '' && $srcDigits !== '' && $targetDigits === $srcDigits) {
+        return ['TGIF Parrot', 'alltune2_tgif_activity_parrot'];
+    }
+
+    if ($alias !== '' && !ctype_digit($alias) && strtoupper($alias) !== 'NONE') {
+        return [$alias, 'alltune2_tgif_activity_feed'];
+    }
+
+    if ($srcId !== '') {
+        return [$srcId, 'alltune2_tgif_activity_feed_id'];
+    }
+
+    return ['TGIF RX', 'alltune2_tgif_activity_unknown'];
+}
+
+function dc_tgif_activity_feed_rows(string $path, string $target, string $tzName, int $sessionStart): array {
+    if (!is_readable($path)) {
+        return [];
+    }
+
+    $mtime = @filemtime($path);
+    if (!$mtime || (time() - $mtime) > 900) {
+        return [];
+    }
+
+    $lines = @file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if (!is_array($lines) || count($lines) === 0) {
+        return [];
+    }
+
+    $lines = array_slice($lines, -240);
+    $starts = [];
+    $ends = [];
+
+    $targetDigits = dc_tgif_digits($target);
+
+    foreach ($lines as $line) {
+        $event = json_decode($line, true);
+        if (!is_array($event)) {
+            continue;
+        }
+
+        $eventName = strtolower((string)($event['event'] ?? ''));
+        $streamId = (string)($event['stream_id'] ?? '');
+        if ($streamId === '' || ($eventName !== 'start' && $eventName !== 'end')) {
+            continue;
+        }
+
+        $eventTarget = dc_tgif_digits((string)($event['dst_tg'] ?? ''));
+        if ($targetDigits !== '' && $eventTarget !== '' && $eventTarget !== $targetDigits) {
+            continue;
+        }
+
+        $stamp = dc_tgif_activity_stamp_from_ts($event['ts'] ?? 0, $tzName);
+        if ($stamp['epoch'] <= 0) {
+            continue;
+        }
+
+        if ($sessionStart > 0 && $stamp['epoch'] < $sessionStart) {
+            continue;
+        }
+
+        $event['_stamp'] = $stamp;
+
+        if ($eventName === 'start') {
+            $starts[$streamId] = $event;
+        } else {
+            $ends[$streamId] = $event;
+        }
+    }
+
+    $rows = [];
+
+    foreach ($starts as $streamId => $start) {
+        $end = $ends[$streamId] ?? null;
+        $stamp = $start['_stamp'];
+        $eventTarget = dc_tgif_digits((string)($start['dst_tg'] ?? $target));
+        if ($eventTarget === '') {
+            $eventTarget = $targetDigits;
+        }
+
+        [$station, $confidence] = dc_tgif_activity_station($start, $eventTarget);
+        $dur = is_array($end) && isset($end['duration'])
+            ? (string)$end['duration']
+            : 'RX';
+
+        $row = dc_make_row(
+            (string)$stamp['utc'],
+            (string)$stamp['display'],
+            'DMR/TGIF',
+            $station,
+            'TG ' . $eventTarget,
+            'Net',
+            $dur
+        );
+
+        $row['identity_confidence'] = $confidence;
+        $row['tgif_stream_id'] = $streamId;
+        $row['_feed_epoch'] = $stamp['epoch'];
+
+        if ($station === 'TGIF RX' || $station === 'TGIF Parrot') {
+            $row['callsign_display'] = $station;
+            unset($row['dmr_id'], $row['qrz_url'], $row['callsign_lookup']);
+        }
+
+        $rows[] = $row;
+    }
+
+    usort($rows, fn($a, $b) => (int)($b['_feed_epoch'] ?? 0) <=> (int)($a['_feed_epoch'] ?? 0));
+
+    return array_slice($rows, 0, 40);
+}
+
+
 function dc_adapter_tgif_hblink(array $analogLines, array $bridgeLines, array $abinfo, array $services, string $tzName): array {
     $rows = [];
     $lastHeard = '--';
@@ -255,16 +391,28 @@ function dc_adapter_tgif_hblink(array $analogLines, array $bridgeLines, array $a
         }
     }
 
-    // Net activity comes from MMDVM_Bridge DMR network headers, not from
-    // Analog_Bridge Begin TX caller fields. However, on some TGIF/HBLink paths
-    // even MMDVM_Bridge can expose a repeated upstream identity for many
-    // different speakers. Track repeated identity and mask it rather than
-    // falsely claiming every speaker is the same station.
-    $lastNetIdx = null;
-    $lastNetEpoch = 0;
-    $tgifIdentityCounts = [];
+    $activityFeedRows = dc_tgif_activity_feed_rows('/var/www/html/alltune2/logs/tgif-activity.jsonl', $target, $tzName, $sessionStart);
 
-    foreach ($bridgeLines as $line) {
+    if (!empty($activityFeedRows)) {
+        foreach ($activityFeedRows as $activityRow) {
+            $rows[] = $activityRow;
+            $feedEpoch = (int)($activityRow['_feed_epoch'] ?? 0);
+            if ($feedEpoch >= $lastSignal) {
+                $lastSignal = $feedEpoch;
+                $lastHeard = (string)($activityRow['callsign_display'] ?? $activityRow['callsign'] ?? 'TGIF RX');
+            }
+        }
+    } else {
+        // Net activity fallback comes from MMDVM_Bridge DMR network headers, not from
+        // Analog_Bridge Begin TX caller fields. However, on some TGIF/HBLink paths
+        // even MMDVM_Bridge can expose a repeated upstream identity for many
+        // different speakers. Track repeated identity and mask it rather than
+        // falsely claiming every speaker is the same station.
+        $lastNetIdx = null;
+        $lastNetEpoch = 0;
+        $tgifIdentityCounts = [];
+
+        foreach ($bridgeLines as $line) {
         $stamp = dc_parse_log_dt($line, $tzName);
         $epoch = (int)($stamp['epoch'] ?? 0);
 
@@ -327,6 +475,8 @@ function dc_adapter_tgif_hblink(array $analogLines, array $bridgeLines, array $a
             }
             continue;
         }
+    }
+
     }
 
     usort($rows, fn($a,$b) => strcmp((string)($b['utc'] ?? ''), (string)($a['utc'] ?? '')));

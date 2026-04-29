@@ -85,7 +85,7 @@ $adapters['ysf']         = dc_adapter_ysf($bridgeLines, $abinfo, $cache, $tzName
 $adapters['dstar']       = dc_adapter_dstar($bridgeLines, $abinfo, $cache, $tzName);
 $adapters['bm_stfu']     = dc_adapter_bm_stfu($stfuLines, $abinfo, $cache, $tzName);
 $adapters['bm_stock']    = dc_adapter_bm_stock($analogLines, $abinfo, $services, $cache, $tzName);
-$adapters['tgif_hblink'] = dc_adapter_tgif_hblink($analogLines, $abinfo, $services, $tzName);
+$adapters['tgif_hblink'] = dc_adapter_tgif_hblink($analogLines, $bridgeLines, $abinfo, $services, $tzName);
 $adapters['generic']     = dc_adapter_generic($bridgeLines, $tzName);
 
 foreach (['ysf','dstar','bm_stfu','bm_stock','tgif_hblink','generic'] as $name) {
@@ -175,6 +175,74 @@ $tlv  = $abinfo['tlv'] ?? [];
 
 $activeAdapter = (string)($active['adapter'] ?? 'idle');
 
+$allHistoryRows = is_array($history['rows'] ?? null) ? $history['rows'] : [];
+$gatewayActivityRows = array_values(array_filter($allHistoryRows, function($r) {
+    return strtoupper((string)($r['src'] ?? '')) === 'NET';
+}));
+$localActivityRows = array_values(array_filter($allHistoryRows, function($r) {
+    $src = strtoupper((string)($r['src'] ?? ''));
+    return $src === 'LNET' || $src === 'RF';
+}));
+
+if (!function_exists('dc_runtime_tgif_row_score')) {
+    function dc_runtime_tgif_row_score(array $r, string $activeTarget): int {
+        $score = 0;
+        $target = (string)($r['target'] ?? '');
+        $station = strtoupper(trim((string)($r['callsign_display'] ?? $r['callsign'] ?? '')));
+
+        if ($activeTarget !== '' && $target === $activeTarget) {
+            $score += 10;
+        }
+        if ($station !== '' && $station !== 'TGIF RX') {
+            $score += 3;
+        }
+        if ($station === 'TGIF PARROT') {
+            $score += 2;
+        }
+        return $score;
+    }
+}
+
+if (!function_exists('dc_runtime_dedupe_tgif_rows')) {
+    function dc_runtime_dedupe_tgif_rows(array $rows, string $activeTarget): array {
+        $out = [];
+        $seen = [];
+
+        foreach ($rows as $r) {
+            $mode = (string)($r['mode'] ?? '');
+            if ($mode !== 'DMR/TGIF') {
+                $out[] = $r;
+                continue;
+            }
+
+            $time = (string)($r['utc'] ?? $r['time'] ?? '');
+            $src  = strtoupper((string)($r['src'] ?? ''));
+            $dur  = (string)($r['dur'] ?? '');
+
+            // TGIF can be parsed repeatedly from shared Analog_Bridge history.
+            // Collapse the same event if it shows up with stale StartRef targets.
+            $key = 'tgif|' . $time . '|' . $src . '|' . $dur;
+
+            if (!isset($seen[$key])) {
+                $seen[$key] = count($out);
+                $out[] = $r;
+                continue;
+            }
+
+            $idx = $seen[$key];
+            $old = $out[$idx];
+
+            if (dc_runtime_tgif_row_score($r, $activeTarget) >= dc_runtime_tgif_row_score($old, $activeTarget)) {
+                $out[$idx] = $r;
+            }
+        }
+
+        return $out;
+    }
+}
+
+$gatewayActivityRows = dc_runtime_dedupe_tgif_rows($gatewayActivityRows, (string)($active['target_display'] ?? ''));
+
 echo json_encode([
     'source_file' => basename($abFile),
     'log_source' => $activeAdapter === 'bm_stfu'
@@ -203,8 +271,8 @@ echo json_encode([
     'connection_state' => $active['connection_state'] ?? 'Idle',
     'last_heard' => $active['last_heard'] ?? '--',
     'services' => $services,
-    'gateway_activity' => dc_history_display_rows($history['rows'] ?? [], 16),
-    'local_activity' => [],
+    'gateway_activity' => dc_history_display_rows($gatewayActivityRows, 16),
+    'local_activity' => dc_history_display_rows($localActivityRows, 12),
     'recent_events' => $recentEvents,
     'vocoder_label' => $vocoderLabel,
     'vocoder_status' => $vocoderStatus,

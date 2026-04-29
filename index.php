@@ -87,10 +87,10 @@ if ($dvcVersion === '') { $dvcVersion = '0.0.0'; }
         <div class="action-status" id="action-status">Service actions ready.</div>
       </aside>
 
-      <section class="center-column center-column-single" style="display:block;">
-        <section class="panel center-top-panel center-top-panel-tall" style="height:472px; display:flex; flex-direction:column;">
+      <section class="center-column center-column-single" style="display:flex; flex-direction:column; gap:14px;">
+        <section class="panel center-top-panel" style="height:330px; display:flex; flex-direction:column;">
           <div class="section-title">Gateway Activity</div>
-          <div class="table-wrap card-dark table-wrap-tall" style="flex:1 1 auto; min-height:410px; max-height:410px;">
+          <div class="table-wrap card-dark table-wrap-tall" style="flex:1 1 auto; min-height:250px; max-height:250px;">
             <table class="activity-table" id="gateway-table">
               <thead>
                 <tr><th>Time</th><th>Mode</th><th>Station</th><th>Target</th><th>Src</th><th>Dur(s)</th><th>Quality</th></tr>
@@ -104,6 +104,18 @@ if ($dvcVersion === '') { $dvcVersion = '0.0.0'; }
             <span>Last Heard: <strong id="footer-last-tune">--</strong></span>
             <span>USRP RX: <strong id="footer-usrp-rx">--</strong></span>
             <span>USRP TX: <strong id="footer-usrp-tx">--</strong></span>
+          </div>
+        </section>
+
+        <section class="panel center-top-panel" style="height:205px; display:flex; flex-direction:column;">
+          <div class="section-title">Local Activity</div>
+          <div class="table-wrap card-dark table-wrap-tall" style="flex:1 1 auto; min-height:145px; max-height:145px;">
+            <table class="activity-table" id="local-table">
+              <thead>
+                <tr><th>Time</th><th>Mode</th><th>Station</th><th>Target</th><th>Src</th><th>Dur(s)</th><th>Quality</th></tr>
+              </thead>
+              <tbody><tr><td colspan="7">Loading local activity...</td></tr></tbody>
+            </table>
           </div>
         </section>
       </section>

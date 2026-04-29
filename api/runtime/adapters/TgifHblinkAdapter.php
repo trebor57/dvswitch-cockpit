@@ -1,38 +1,38 @@
 <?php
 declare(strict_types=1);
 
+function dc_tgif_digits(string $value): string {
+    return preg_replace('/\D+/', '', $value) ?? '';
+}
+
 function dc_tgif_clean_station(string $value): string {
     $value = strtoupper(trim($value));
     if ($value === '' || $value === 'NONE' || $value === 'UNKNOWN') return '';
     return $value;
 }
 
-function dc_tgif_should_hide_net_identity(string $src, string $dst, string $gateway, string $target, string $slot, string $cc): bool {
-    $src = preg_replace('/\D+/', '', $src) ?? '';
-    $dst = preg_replace('/\D+/', '', $dst) ?? '';
-    $gateway = preg_replace('/\D+/', '', $gateway) ?? '';
-    $target = preg_replace('/\D+/', '', $target) ?? '';
+function dc_tgif_station_from_mmdvm(string $raw, string $target): array {
+    $raw = dc_tgif_clean_station($raw);
+    $digits = dc_tgif_digits($raw);
+    $targetDigits = dc_tgif_digits($target);
 
-    // Do not special-case TGIF parrot here.
-    // Non-local TGIF Net RX identity is still untrusted.
-    // Local keyups are handled separately and still show the local station.
-
-    // For non-parrot TGIF network RX, the backend may expose an upstream/gateway
-    // identity instead of the true speaker. Keep the RX event and target visible,
-    // but do not present that identity as a confirmed caller.
-    if ($slot === '2' && $cc === '0') {
-        return true;
+    if ($raw === '') {
+        return ['TGIF RX', 'network_rx_only'];
     }
 
-    return false;
-}
+    if ($targetDigits !== '' && $digits !== '' && $digits === $targetDigits) {
+        return ['TGIF Parrot', 'tgif_parrot'];
+    }
 
-function dc_tgif_rx_row(string $utc, string $display, string $target, string $dur = '--'): array {
-    $row = dc_make_row($utc, $display, 'DMR/TGIF', 'TGIF RX', 'TG ' . $target, 'Net', $dur);
-    $row['callsign_display'] = 'TGIF RX';
-    unset($row['dmr_id'], $row['qrz_url'], $row['callsign_lookup']);
-    $row['identity_confidence'] = 'network_rx_only';
-    return $row;
+    if (dc_is_callsign_like($raw)) {
+        return [$raw, 'mmdvm_network_header'];
+    }
+
+    if ($digits !== '') {
+        return [$digits, 'mmdvm_numeric_id'];
+    }
+
+    return ['TGIF RX', 'network_rx_only'];
 }
 
 function dc_tgif_active_mmdvm_path(): array {
@@ -69,25 +69,49 @@ function dc_tgif_active_mmdvm_path(): array {
     return $out;
 }
 
-function dc_adapter_tgif_hblink(array $analogLines, array $abinfo, array $services, string $tzName): array {
+function dc_tgif_find_session_start(array $analogLines, string $tzName): int {
+    $lastDmrStart = 0;
+    $lastMode = '';
+
+    foreach ($analogLines as $line) {
+        $stamp = dc_parse_log_dt($line, $tzName);
+        $epoch = (int)($stamp['epoch'] ?? 0);
+
+        if (preg_match('/MESSAGE packet sent to USRP client:\s+Setting mode to\s+([A-Z0-9_-]+)/i', $line, $m)) {
+            $lastMode = strtoupper(trim($m[1]));
+            if ($lastMode === 'DMR') {
+                $lastDmrStart = max($lastDmrStart, $epoch);
+            }
+            continue;
+        }
+
+        if (preg_match('/\bambeMode\s*=\s*([A-Z0-9_-]+)/i', $line, $m)) {
+            $lastMode = strtoupper(trim($m[1]));
+            if ($lastMode === 'DMR') {
+                $lastDmrStart = max($lastDmrStart, $epoch);
+            }
+            continue;
+        }
+
+        if (preg_match('/EVENT:\s+\{"topic":"dvswitch\/MMDVM_Bridge\/DMR","message":"login success"\}/', $line)) {
+            $lastDmrStart = max($lastDmrStart, $epoch);
+            continue;
+        }
+    }
+
+    return $lastDmrStart;
+}
+
+function dc_adapter_tgif_hblink(array $analogLines, array $bridgeLines, array $abinfo, array $services, string $tzName): array {
     $rows = [];
-    $currentTarget = '';
     $lastHeard = '--';
     $lastSignal = 0;
     $lastConnectSignal = 0;
     $lastDisconnectSignal = 0;
-    $lastIdx = null;
-    $lastIdxEpoch = 0;
-    $lastIdxWasMaskedNetRx = false;
-    $targetSource = '';
-    $targetCameFromGatewayCorrectedFrame = false;
-    $modeContext = '';
 
     $liveMode = strtoupper((string)($abinfo['tlv']['ambe_mode'] ?? ''));
     $gateway = trim((string)($abinfo['digital']['gw'] ?? ''));
     $localCall = trim((string)($abinfo['digital']['call'] ?? ''));
-    $hblinkActive = in_array(($services['hblink'] ?? ''), ['active', 'activating'], true)
-        || !empty($services['hblink_process']);
 
     $privateLink = is_array($abinfo['_runtime']['private_audio_link'] ?? null)
         ? $abinfo['_runtime']['private_audio_link']
@@ -96,28 +120,20 @@ function dc_adapter_tgif_hblink(array $analogLines, array $abinfo, array $servic
     $privateLinkActive = !empty($privateLink['linked']);
     $privateLinkNode = trim((string)($privateLink['dvswitch_node'] ?? ''));
 
-    $localStation = function () use ($gateway, $localCall): string {
-        if ($localCall !== '') return $localCall;
-        if ($gateway !== '') return $gateway;
-        return 'Local';
-    };
-
-    // TGIF/HBLink is a DMR-lane display adapter. It does not connect or disconnect anything.
-    if ($liveMode !== 'DMR') {
-        return dc_idle_adapter('TGIF');
-    }
-
     $configuredTarget = trim((string)($abinfo['_runtime']['tgif_hblink_target']['value'] ?? ''));
     $configuredSource = trim((string)($abinfo['_runtime']['tgif_hblink_target']['source'] ?? ''));
 
     $activeMmdvmPath = dc_tgif_active_mmdvm_path();
     $useHblinkConfig = ($activeMmdvmPath['mode'] === 'hblink');
 
-    // hblink.cfg is the best source for the selected TGIF room number, but it is
-    // NOT proof that the room is still connected. The helper may leave StartRef in
-    // place after disconnect, so state must come from live service/log evidence.
+    $hblinkActive = in_array(($services['hblink'] ?? ''), ['active', 'activating'], true)
+        || !empty($services['hblink_process']);
+
+    $target = '';
+    $targetSource = '';
+
     if ($useHblinkConfig && $configuredTarget !== '' && $configuredTarget !== '0' && ($gateway === '' || $configuredTarget !== $gateway)) {
-        $currentTarget = $configuredTarget;
+        $target = $configuredTarget;
         $targetSource = 'hblink_config';
     }
 
@@ -129,35 +145,73 @@ function dc_adapter_tgif_hblink(array $analogLines, array $abinfo, array $servic
         $lastDisconnectSignal = max($lastDisconnectSignal, $latestTxTgEpoch);
     }
 
-    // Only use txTg when it is a real TG, not the local gateway/private ID.
-    if (!$latestTxTgDisconnect && $latestTxTg !== '' && $latestTxTg !== '0' && ($gateway === '' || $latestTxTg !== $gateway)) {
-        if ($currentTarget === '') {
-            $currentTarget = $latestTxTg;
-            $targetSource = 'txtg';
-        }
+    if ($target === '' && !$latestTxTgDisconnect && $latestTxTg !== '' && $latestTxTg !== '0' && ($gateway === '' || $latestTxTg !== $gateway)) {
+        $target = $latestTxTg;
+        $targetSource = 'latest_txtg';
         $lastConnectSignal = max($lastConnectSignal, $latestTxTgEpoch);
-        $lastSignal = max($lastSignal, $latestTxTgEpoch);
     }
+
+    $hasTarget = $target !== '' && $target !== '0' && ($gateway === '' || $target !== $gateway);
+    $disconnectWins = $lastDisconnectSignal > 0 && $lastDisconnectSignal >= $lastConnectSignal;
+
+    $state = 'Idle';
+    if ($liveMode === 'DMR' && $hasTarget && !$disconnectWins) {
+        if ($privateLinkKnown) {
+            if ($privateLinkActive) {
+                $state = 'Connected';
+            }
+        } elseif ($hblinkActive || $useHblinkConfig) {
+            $state = 'Connected';
+        }
+    }
+
+    if ($state !== 'Connected') {
+        return dc_idle_adapter('TGIF');
+    }
+
+    $sessionStart = dc_tgif_find_session_start($analogLines, $tzName);
+
+    $localStation = function () use ($gateway, $localCall): string {
+        if ($localCall !== '') return $localCall;
+        if ($gateway !== '') return $gateway;
+        return 'Local';
+    };
+
+    // Local activity comes from Analog_Bridge PTT timing, but only for the
+    // current DMR/TGIF session. Older Analog_Bridge rows must not be rewritten
+    // to the current StartRef.
+    $modeContext = ($liveMode === 'DMR') ? 'DMR' : '';
+    $pttOnEpoch = 0;
 
     foreach ($analogLines as $line) {
         $stamp = dc_parse_log_dt($line, $tzName);
         $epoch = (int)($stamp['epoch'] ?? 0);
 
+        if ($sessionStart > 0 && $epoch > 0 && $epoch < $sessionStart) {
+            continue;
+        }
+
         if (preg_match('/MESSAGE packet sent to USRP client:\s+Setting mode to\s+([A-Z0-9_-]+)/i', $line, $m)) {
             $modeContext = strtoupper(trim($m[1]));
-        } elseif (preg_match('/\bambeMode\s*=\s*([A-Z0-9_-]+)/i', $line, $m)) {
+            continue;
+        }
+
+        if (preg_match('/\bambeMode\s*=\s*([A-Z0-9_-]+)/i', $line, $m)) {
             $modeContext = strtoupper(trim($m[1]));
+            continue;
         }
 
         if (preg_match('/EVENT:\s+\{"topic":"dvswitch\/MMDVM_Bridge\/DMR","message":"login success"\}/', $line)) {
-            if ($currentTarget !== '' && $currentTarget !== '0' && ($gateway === '' || $currentTarget !== $gateway)) {
-                $lastConnectSignal = max($lastConnectSignal, $epoch);
-                $lastSignal = max($lastSignal, $epoch);
-            }
+            $lastConnectSignal = max($lastConnectSignal, $epoch);
+            $lastSignal = max($lastSignal, $epoch);
             continue;
         }
 
         if (preg_match('/\btxTg\s*=?\s*:?\s*([0-9#]+)/i', $line, $m)) {
+            if ($modeContext !== '' && $modeContext !== 'DMR') {
+                continue;
+            }
+
             $raw = trim($m[1]);
             $tg = rtrim($raw, '#');
 
@@ -166,201 +220,145 @@ function dc_adapter_tgif_hblink(array $analogLines, array $abinfo, array $servic
                 continue;
             }
 
-            if ($gateway === '' || $tg !== $gateway) {
-                if ($targetSource !== 'hblink_config') {
-                    $currentTarget = $tg;
-                    $targetSource = 'txtg';
-                    $targetCameFromGatewayCorrectedFrame = false;
-                }
-                $lastConnectSignal = max($lastConnectSignal, $epoch);
-                $lastSignal = max($lastSignal, $epoch);
-            }
-            continue;
-        }
-
-        if (preg_match('/Begin TX:\s*src=([0-9]+)\s+rpt=([0-9]+)\s+dst=([0-9]+)\s+slot=([0-9]+)\s+cc=([0-9]+)\s+call=([A-Z0-9\-]*)/i', $line, $m)) {
-            $src = trim($m[1]);
-            $call = trim($m[6]) !== '' ? trim($m[6]) : $src;
-            $dst = trim($m[3]);
-            $slot = trim($m[4]);
-            $cc = trim($m[5]);
-
-            // BM/stock DMR commonly appears as slot=1 cc=1.
-            // Do not let those rows duplicate as DMR/TGIF.
-            if ($slot === '1' && $cc === '1') {
-                continue;
-            }
-
-            $rowTarget = '';
-
-            // TGIF/HBLink RX frames often use dst=<local gateway ID> and
-            // src=<station DMR ID>.  In that case src is the station, not the
-            // TGIF room.  Prefer the selected HBLink target for the Target
-            // column.  Fall back to src only when there is no selected target.
-            if ($gateway !== '' && $dst === $gateway && $src !== $gateway) {
-                if ($currentTarget !== '' && $currentTarget !== '0' && $currentTarget !== $gateway) {
-                    $rowTarget = $currentTarget;
-                } elseif ($useHblinkConfig && $configuredTarget !== '' && $configuredTarget !== '0' && $configuredTarget !== $gateway) {
-                    $rowTarget = $configuredTarget;
-                    $currentTarget = $configuredTarget;
-                    $targetSource = 'hblink_config';
-                } else {
-                    $rowTarget = $src;
-                    if ($targetSource !== 'hblink_config') {
-                        $currentTarget = $src;
-                        $targetSource = 'gateway_corrected_frame';
-                        $targetCameFromGatewayCorrectedFrame = true;
-                    }
-                }
-            } elseif ($dst !== '' && $dst !== '0' && ($gateway === '' || $dst !== $gateway)) {
-                $rowTarget = $dst;
-                if ($currentTarget === '') {
-                    $currentTarget = $dst;
-                    $targetSource = 'frame_dst';
-                }
-            } elseif ($currentTarget !== '') {
-                $rowTarget = $currentTarget;
-            }
-
-            if ($rowTarget === '' || $rowTarget === '0' || ($gateway !== '' && $rowTarget === $gateway)) {
-                continue;
-            }
-
-            // If the active runtime says TGIF/HBLink is using StartRef, that is
-            // the selected TGIF room. Some DVSwitch/HBLink paths still expose
-            // Analog_Bridge txTg/dst from an older or startup value, such as
-            // 19570. Do not let that stale dst override the active TGIF target.
-            if ($useHblinkConfig && $configuredTarget !== '' && $configuredTarget !== '0' && ($gateway === '' || $configuredTarget !== $gateway)) {
-                $rowTarget = $configuredTarget;
-            }
-
-            $slot = trim($m[4]);
-            $cc = trim($m[5]);
-            $maskNetIdentity = dc_tgif_should_hide_net_identity($src, $dst, $gateway, $rowTarget, $slot, $cc);
-
-            if ($maskNetIdentity) {
-                $rows[] = dc_tgif_rx_row(
-                    (string)($stamp['utc'] ?? ''),
-                    (string)($stamp['display'] ?? '--'),
-                    $rowTarget
-                );
-                $lastHeard = 'TGIF RX';
-                $lastIdxWasMaskedNetRx = true;
-            } else {
-                $safeCall = dc_tgif_clean_station($call);
-                if ($safeCall === '') {
-                    $safeCall = $src !== '' ? $src : 'TGIF RX';
-                }
-
-                $rows[] = dc_make_row(
-                    (string)($stamp['utc'] ?? ''),
-                    (string)($stamp['display'] ?? '--'),
-                    'DMR/TGIF',
-                    $safeCall,
-                    'TG ' . $rowTarget,
-                    'Net'
-                );
-                $lastHeard = $safeCall;
-                $lastIdxWasMaskedNetRx = false;
-            }
-
-            $lastIdx = count($rows) - 1;
-            $lastIdxEpoch = $epoch;
             $lastConnectSignal = max($lastConnectSignal, $epoch);
             $lastSignal = max($lastSignal, $epoch);
             continue;
         }
 
-        if (preg_match('/PTT off \(keyed for ([0-9]+) ms\)/i', $line, $m)) {
-            $dur = number_format(((int)$m[1]) / 1000, 2, '.', '');
-            if ($lastIdx !== null && isset($rows[$lastIdx]) && $lastIdxEpoch > 0 && ($epoch - $lastIdxEpoch) <= 15) {
-                $rows[$lastIdx]['dur'] = $dur;
-                $lastSignal = max($lastSignal, $epoch);
-            } else {
-                $localTarget = '';
-                if ($useHblinkConfig && $configuredTarget !== '' && $configuredTarget !== '0' && ($gateway === '' || $configuredTarget !== $gateway)) {
-                    $localTarget = $configuredTarget;
-                } elseif ($currentTarget !== '' && $currentTarget !== '0' && ($gateway === '' || $currentTarget !== $gateway)) {
-                    $localTarget = $currentTarget;
-                }
-
-                if ($modeContext === 'DMR' && $localTarget !== '') {
-                    $rows[] = dc_make_row(
-                        (string)($stamp['utc'] ?? ''),
-                        (string)($stamp['display'] ?? '--'),
-                        'DMR/TGIF',
-                        $localStation(),
-                        'TG ' . $localTarget,
-                        'LNet',
-                        $dur
-                    );
-                    $lastIdx = count($rows) - 1;
-                    $lastIdxEpoch = $epoch;
-                    $lastHeard = $localStation();
-                    $lastIdxWasMaskedNetRx = false;
-                    $lastConnectSignal = max($lastConnectSignal, $epoch);
-                    $lastSignal = max($lastSignal, $epoch);
-                }
+        if (preg_match('/PTT on/i', $line)) {
+            if ($modeContext === 'DMR') {
+                $pttOnEpoch = $epoch;
             }
+            continue;
+        }
+
+        if (preg_match('/PTT off \(keyed for ([0-9]+) ms\)/i', $line, $m)) {
+            if ($modeContext !== 'DMR') {
+                continue;
+            }
+
+            $dur = number_format(((int)$m[1]) / 1000, 2, '.', '');
+
+            $rows[] = dc_make_row(
+                (string)($stamp['utc'] ?? ''),
+                (string)($stamp['display'] ?? '--'),
+                'DMR/TGIF',
+                $localStation(),
+                'TG ' . $target,
+                'LNet',
+                $dur
+            );
+
+            $lastSignal = max($lastSignal, $epoch);
+            $pttOnEpoch = 0;
+            continue;
         }
     }
 
-    $hasCurrentTarget = $currentTarget !== '' && $currentTarget !== '0' && ($gateway === '' || $currentTarget !== $gateway);
-    $hasRecentConnectSignal = dc_is_recent_epoch($lastConnectSignal, 90);
-    $disconnectWins = $lastDisconnectSignal > 0 && $lastDisconnectSignal >= $lastConnectSignal;
+    // Net activity comes from MMDVM_Bridge DMR network headers, not from
+    // Analog_Bridge Begin TX caller fields. However, on some TGIF/HBLink paths
+    // even MMDVM_Bridge can expose a repeated upstream identity for many
+    // different speakers. Track repeated identity and mask it rather than
+    // falsely claiming every speaker is the same station.
+    $lastNetIdx = null;
+    $lastNetEpoch = 0;
+    $tgifIdentityCounts = [];
 
-    $state = 'Idle';
-    if ($privateLinkKnown) {
-        if ($privateLinkActive && $hasCurrentTarget && !$disconnectWins) {
-            $state = 'Connected';
+    foreach ($bridgeLines as $line) {
+        $stamp = dc_parse_log_dt($line, $tzName);
+        $epoch = (int)($stamp['epoch'] ?? 0);
+
+        if ($sessionStart > 0 && $epoch > 0 && $epoch < $sessionStart) {
+            continue;
         }
-    } elseif ($hasCurrentTarget && !$disconnectWins && $hasRecentConnectSignal) {
-        $state = 'Connected';
+
+        if (preg_match('/DMR Slot\s+[0-9]+,\s+received network (?:voice header|late entry) from\s+(.+?)\s+to TG\s+(.+)$/i', $line, $m)) {
+            $rawStation = trim($m[1]);
+            [$station, $confidence] = dc_tgif_station_from_mmdvm($rawStation, $target);
+
+            $identityKey = strtoupper($rawStation);
+            if ($identityKey !== '') {
+                $tgifIdentityCounts[$identityKey] = ($tgifIdentityCounts[$identityKey] ?? 0) + 1;
+            }
+
+            // If the same non-parrot TGIF identity repeats over and over in one
+            // session, the upstream path is likely exposing a stuck/representative
+            // caller, not the true speaker. Do not lie by showing that callsign
+            // for every transmission.
+            if (
+                $station !== 'TGIF RX' &&
+                $station !== 'TGIF Parrot' &&
+                $identityKey !== '' &&
+                ($tgifIdentityCounts[$identityKey] ?? 0) >= 4
+            ) {
+                $station = 'TGIF RX';
+                $confidence = 'masked_repeated_tgif_identity';
+            }
+
+            $row = dc_make_row(
+                (string)($stamp['utc'] ?? ''),
+                (string)($stamp['display'] ?? '--'),
+                'DMR/TGIF',
+                $station,
+                'TG ' . $target,
+                'Net',
+                'RX'
+            );
+            $row['identity_confidence'] = $confidence;
+            if ($station === 'TGIF RX' || $station === 'TGIF Parrot') {
+                $row['callsign_display'] = $station;
+                unset($row['dmr_id'], $row['qrz_url'], $row['callsign_lookup']);
+            }
+
+            $rows[] = $row;
+            $lastNetIdx = count($rows) - 1;
+            $lastNetEpoch = $epoch;
+            $lastHeard = $station;
+            $lastSignal = max($lastSignal, $epoch);
+            continue;
+        }
+
+        if (preg_match('/DMR Slot\s+[0-9]+,\s+received network end of voice transmission,\s+([0-9.]+)\s+seconds,\s+([0-9.]+%)\s+packet loss,\s+BER:\s+([0-9.]+%)/i', $line, $m)) {
+            if ($lastNetIdx !== null && isset($rows[$lastNetIdx]) && $lastNetEpoch > 0 && ($epoch - $lastNetEpoch) <= 20) {
+                $rows[$lastNetIdx]['dur'] = $m[1];
+                $rows[$lastNetIdx]['loss'] = $m[2];
+                $rows[$lastNetIdx]['ber'] = $m[3];
+                $lastSignal = max($lastSignal, $epoch);
+            }
+            continue;
+        }
     }
 
     usort($rows, fn($a,$b) => strcmp((string)($b['utc'] ?? ''), (string)($a['utc'] ?? '')));
 
-    $note = '(from TGIF/HBLink runtime; TGIF Net caller identity is hidden when only a gateway/upstream ID is exposed)';
-    if ($targetSource === 'hblink_config') {
-        $note = '(from TGIF/HBLink StartRef in hblink.cfg)';
-    } elseif ($targetSource === 'gateway_corrected_frame') {
-        $note = '(from TGIF/HBLink frame; gateway ID corrected)';
-    } elseif ($targetSource === 'txtg') {
-        $note = '(from Analog_Bridge txTg)';
-    }
-    if ($disconnectWins) {
-        $note = '(TGIF idle/disconnected; last txTg was 0 or disconnect marker)';
+    $displayTarget = 'TG ' . $target;
+
+    $note = '(from TGIF/HBLink current session; Net caller from MMDVM_Bridge, Local activity from Analog_Bridge PTT)';
+    if ($privateLinkKnown && $privateLinkActive && $targetSource === 'hblink_config') {
+        $note = '(from TGIF/HBLink StartRef in hblink.cfg; private audio node linked; Net caller from MMDVM_Bridge)';
     } elseif ($privateLinkKnown && !$privateLinkActive) {
         $note = '(TGIF idle; private DVSwitch audio node ' . $privateLinkNode . ' is not linked)';
-    } elseif ($privateLinkKnown && $privateLinkActive && $targetSource === 'hblink_config') {
-        $note = '(from TGIF/HBLink StartRef in hblink.cfg; private audio node linked; TGIF Net caller may be RX-only if upstream does not expose individual ID)';
-    } elseif ($state !== 'Connected' && $hasCurrentTarget && $targetSource === 'hblink_config') {
-        $note = '(TGIF target remembered in hblink.cfg, but no current private-link/live evidence)';
     }
-
-    $displayTarget = ($state === 'Connected' && $hasCurrentTarget) ? ('TG ' . $currentTarget) : '--';
 
     return [
         'adapter' => 'tgif_hblink',
         'provider' => 'TGIF/HBLink',
         'network' => 'TGIF',
-        'connection_state' => $state,
-        'path_label' => $state === 'Connected' ? 'HBLink + DMR' : 'Idle',
+        'connection_state' => 'Connected',
+        'path_label' => 'HBLink + DMR',
         'target_display' => $displayTarget,
         'target_note' => $note,
-        'last_heard' => $state === 'Connected' ? $lastHeard : '--',
-        'rows' => $state === 'Connected' ? array_slice($rows, 0, 40) : [],
+        'last_heard' => $lastHeard,
+        'rows' => array_slice($rows, 0, 40),
         'left_label' => 'Current TG',
         'left_value' => $displayTarget,
-        'signal_epoch' => $state === 'Connected' ? $lastSignal : 0,
+        'signal_epoch' => $lastSignal,
         'debug_target_source' => $configuredSource,
-        'debug_last_connect_epoch' => $lastConnectSignal,
-        'debug_last_disconnect_epoch' => $lastDisconnectSignal,
+        'debug_session_start_epoch' => $sessionStart,
         'debug_hblink_active' => $hblinkActive,
         'debug_active_mmdvm_mode' => $activeMmdvmPath['mode'],
         'debug_active_mmdvm_address' => $activeMmdvmPath['address'],
         'debug_active_mmdvm_port' => $activeMmdvmPath['port'],
-        'debug_recent_connect_signal' => $hasRecentConnectSignal,
         'debug_private_link_known' => $privateLinkKnown,
         'debug_private_link_active' => $privateLinkActive,
         'debug_private_link_node' => $privateLinkNode,

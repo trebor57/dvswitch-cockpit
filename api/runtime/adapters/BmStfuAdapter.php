@@ -99,16 +99,22 @@ function dc_adapter_bm_stfu(array $stfuLines, array $abinfo, array $cache, strin
             $rememberTarget($rowTargetNum, 'STFU traffic');
             $target = 'TG ' . $rowTargetNum;
 
+            // Local STFU/parrot/self key-ups can log src as the selected TG
+            // instead of a real remote station. Those belong in Local Activity.
+            $isLikelyLocalKeyup = ($src !== '' && $rowTargetNum !== '' && $src === $rowTargetNum);
+            $rowStation = $isLikelyLocalKeyup ? $localStation() : $src;
+            $rowSource = $isLikelyLocalKeyup ? 'LNet' : 'Net';
+
             $rows[] = dc_make_row(
                 (string)($stamp['utc'] ?? ''),
                 (string)($stamp['display'] ?? '--'),
                 'DMR/BM',
-                $src,
+                $rowStation,
                 $target,
-                'Net'
+                $rowSource
             );
             $openIdx = count($rows) - 1;
-            $lastHeard = $src;
+            $lastHeard = $rowStation;
             $lastSignal = max($lastSignal, $epoch);
             // Real traffic means the live STFU session is up.
             $lastConnectEpoch = max($lastConnectEpoch, $epoch);

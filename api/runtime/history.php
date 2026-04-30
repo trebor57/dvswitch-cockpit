@@ -118,61 +118,118 @@ function dc_history_remove_cross_mode_duplicates(array $rows): array {
     return $out;
 }
 
+function dc_history_target_digits(string $target): string {
+    return preg_replace('/\D+/', '', $target) ?? '';
+}
+
+function dc_history_display_station(array $row): string {
+    return trim((string)($row['callsign_display'] ?? $row['callsign'] ?? ''));
+}
+
+function dc_history_parrot_display_key(array $row): string {
+    $mode = strtoupper((string)($row['mode'] ?? ''));
+    $src = strtoupper((string)($row['src'] ?? ''));
+    $target = (string)($row['target'] ?? '');
+    $targetDigits = dc_history_target_digits($target);
+
+    // P25/NXDN talkback/parrot rows can appear multiple ways in history:
+    // PARROT, 10999, 9999, or the local callsign. Display one stock-style row.
+    if ($src === 'NET' && ($mode === 'P25' || $mode === 'NXDN') && $targetDigits === '10') {
+        return implode('|', [
+            (string)($row['utc'] ?? ''),
+            $mode,
+            'PARROT_TG10',
+            $target,
+            $src,
+            (string)($row['dur'] ?? ''),
+        ]);
+    }
+
+    // P25 TG 9999 is commonly shown by stock DVSwitch as MMDVM.
+    if ($src === 'NET' && $mode === 'P25' && $targetDigits === '9999') {
+        return implode('|', [
+            (string)($row['utc'] ?? ''),
+            $mode,
+            'MMDVM_TG9999',
+            $target,
+            $src,
+            (string)($row['dur'] ?? ''),
+        ]);
+    }
+
+    return implode('|', [
+        (string)($row['utc'] ?? ''),
+        $mode,
+        dc_history_display_station($row),
+        $target,
+        $src,
+        (string)($row['dur'] ?? ''),
+    ]);
+}
+
+function dc_history_display_row_score(array $row): int {
+    $mode = strtoupper((string)($row['mode'] ?? ''));
+    $src = strtoupper((string)($row['src'] ?? ''));
+    $targetDigits = dc_history_target_digits((string)($row['target'] ?? ''));
+    $station = strtoupper(dc_history_display_station($row));
+
+    $score = 0;
+
+    if ($src === 'LNET') {
+        $score += 20;
+    }
+
+    if ($src === 'NET' && ($mode === 'P25' || $mode === 'NXDN') && $targetDigits === '10') {
+        if ($station === 'PARROT') {
+            $score += 100;
+        } elseif (preg_match('/^\d+$/', $station)) {
+            $score += 10;
+        }
+    }
+
+    if ($src === 'NET' && $mode === 'P25' && $targetDigits === '9999') {
+        if ($station === 'MMDVM') {
+            $score += 100;
+        } elseif (preg_match('/^\d+$/', $station)) {
+            $score += 10;
+        }
+    }
+
+    if (dc_merge_value_is_useful($row['dur'] ?? '')) {
+        $score += 5;
+    }
+    if (dc_merge_value_is_useful($row['loss'] ?? '') || dc_merge_value_is_useful($row['ber'] ?? '')) {
+        $score += 3;
+    }
+
+    return $score;
+}
+
 function dc_history_display_rows(array $rows, int $limit = 16): array {
     $rows = dc_history_remove_cross_mode_duplicates($rows);
-    usort($rows, fn($a,$b) => strcmp((string)($b['utc'] ?? ''), (string)($a['utc'] ?? '')));
 
-    $out = [];
-    $used = [];
-    $perModeLimit = 6;
+    $deduped = [];
+    foreach ($rows as $row) {
+        $key = dc_history_parrot_display_key($row);
 
-    foreach ($rows as $idx => $row) {
-        $mode = (string)($row['mode'] ?? 'unknown');
-        $used[$mode] = $used[$mode] ?? 0;
-
-        if ($used[$mode] >= $perModeLimit) {
+        if (!isset($deduped[$key])) {
+            $deduped[$key] = $row;
             continue;
         }
 
-        $out[] = $row;
-        $used[$mode]++;
-        if (count($out) >= $limit) {
-            return $out;
+        $old = $deduped[$key];
+
+        if (dc_history_display_row_score($row) > dc_history_display_row_score($old)) {
+            $deduped[$key] = dc_merge_prefer_useful_row($row, $old);
+        } else {
+            $deduped[$key] = dc_merge_prefer_useful_row($old, $row);
         }
     }
 
-    foreach ($rows as $row) {
-        if (count($out) >= $limit) break;
+    $deduped = array_values($deduped);
+    usort($deduped, fn($a, $b) => strcmp((string)($b['utc'] ?? ''), (string)($a['utc'] ?? '')));
 
-        $key = implode('|', [
-            (string)($row['utc'] ?? ''),
-            (string)($row['mode'] ?? ''),
-            (string)($row['callsign'] ?? ''),
-            (string)($row['target'] ?? ''),
-            (string)($row['src'] ?? ''),
-        ]);
-
-        $already = false;
-        foreach ($out as $existing) {
-            $existingKey = implode('|', [
-                (string)($existing['utc'] ?? ''),
-                (string)($existing['mode'] ?? ''),
-                (string)($existing['callsign'] ?? ''),
-                (string)($existing['target'] ?? ''),
-                (string)($existing['src'] ?? ''),
-            ]);
-            if ($existingKey === $key) {
-                $already = true;
-                break;
-            }
-        }
-
-        if (!$already) {
-            $out[] = $row;
-        }
-    }
-
-    return array_slice($out, 0, $limit);
+    return array_slice($deduped, 0, $limit);
 }
 
 function dc_load_state_cache(): array {

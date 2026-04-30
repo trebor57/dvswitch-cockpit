@@ -86,7 +86,7 @@ $adapters['dstar']       = dc_adapter_dstar($bridgeLines, $abinfo, $cache, $tzNa
 $adapters['bm_stfu']     = dc_adapter_bm_stfu($stfuLines, $abinfo, $cache, $tzName);
 $adapters['bm_stock']    = dc_adapter_bm_stock($analogLines, $abinfo, $services, $cache, $tzName);
 $adapters['tgif_hblink'] = dc_adapter_tgif_hblink($analogLines, $bridgeLines, $abinfo, $services, $tzName);
-$adapters['generic']     = dc_adapter_generic($bridgeLines, $tzName);
+$adapters['generic']     = dc_adapter_generic($bridgeLines, $tzName, $abinfo);
 
 foreach (['ysf','dstar','bm_stfu','bm_stock','tgif_hblink','generic'] as $name) {
     if (!isset($adapters[$name]) || !is_array($adapters[$name])) {

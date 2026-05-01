@@ -10,6 +10,12 @@ function dc_security_header_value(string $name): string {
     return trim((string)($_SERVER[$key] ?? ''));
 }
 
+function dc_security_cache_dir(): string {
+    $dir = dirname(__DIR__) . '/data/cache';
+    if (!is_dir($dir)) @mkdir($dir, 0755, true);
+    return $dir;
+}
+
 function dc_security_remote_addr(): string {
     return trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
 }
@@ -87,7 +93,7 @@ function dc_security_apply_headers(): void {
     header('X-Content-Type-Options: nosniff');
     header('Referrer-Policy: same-origin');
     header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
-    header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
+    header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://raw.githubusercontent.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
 }
 
 function dc_security_deny(string $message = 'Forbidden'): never {
@@ -168,7 +174,7 @@ function dc_security_require_action_header(): void {
 function dc_security_rate_limit(string $bucket, int $limit, int $windowSeconds): void {
     if (dc_security_is_cli()) return;
     $remote = preg_replace('/[^A-Za-z0-9_.:-]/', '_', dc_security_remote_addr()) ?: 'unknown';
-    $dir = sys_get_temp_dir() . '/dvswitch_cockpit_rate_limit';
+    $dir = dc_security_cache_dir() . '/rate_limit';
     if (!is_dir($dir)) @mkdir($dir, 0700, true);
     $file = $dir . '/' . preg_replace('/[^A-Za-z0-9_.-]/', '_', $bucket) . '_' . $remote . '.json';
     $now = time();

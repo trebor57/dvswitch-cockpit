@@ -203,7 +203,7 @@ function dc_parse_dmr_subscriber_file(string $file, int $maxRows = 0): array {
     $idIndex = -1;
     $callIndex = -1;
     $lineNo = 0;
-    while (($row = fgetcsv($fh)) !== false) {
+    while (($row = fgetcsv($fh, 0, ',', '"', '\\')) !== false) {
         $lineNo++;
         if ($maxRows > 0 && $lineNo > $maxRows) break;
         if (!is_array($row) || count($row) < 2) continue;

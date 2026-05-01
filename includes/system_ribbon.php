@@ -42,6 +42,18 @@ function dvc_human_rate(float $bytesPerSec): string
     return number_format($bits, $dec) . ' ' . $units[$i];
 }
 
+function dvc_cache_dir(): string
+{
+    $dir = dirname(__DIR__) . '/data/cache';
+    if (!is_dir($dir)) @mkdir($dir, 0755, true);
+    return $dir;
+}
+
+function dvc_cache_path(string $name): string
+{
+    return dvc_cache_dir() . '/' . preg_replace('/[^A-Za-z0-9_.-]/', '_', $name);
+}
+
 function dvc_human_uptime(int $seconds): string
 {
     $days = intdiv($seconds, 86400);
@@ -63,7 +75,7 @@ function dvc_cpu_percent(): string
     $nums = array_map('floatval', array_slice($parts, 1));
     $idle = ($nums[3] ?? 0.0) + ($nums[4] ?? 0.0);
     $total = array_sum($nums);
-    $cache = sys_get_temp_dir() . '/dvcockpit_cpu_sample.json';
+    $cache = dvc_cache_path('dvcockpit_cpu_sample.json');
     $old = is_readable($cache) ? json_decode((string) @file_get_contents($cache), true) : null;
     @file_put_contents($cache, json_encode(['idle' => $idle, 'total' => $total, 'time' => microtime(true)]));
     if (!is_array($old)) return '0%';
@@ -191,7 +203,7 @@ function dvc_collect(): array
     $rxNow = dvc_read("/sys/class/net/$iface/statistics/rx_bytes");
     $txNow = dvc_read("/sys/class/net/$iface/statistics/tx_bytes");
     if ($rxNow !== null && $txNow !== null && is_numeric($rxNow) && is_numeric($txNow)) {
-        $cache = sys_get_temp_dir() . '/dvcockpit_rate_' . preg_replace('/[^A-Za-z0-9_.-]/', '_', $iface) . '.json';
+        $cache = dvc_cache_path('dvcockpit_rate_' . preg_replace('/[^A-Za-z0-9_.-]/', '_', $iface) . '.json');
         $old = is_readable($cache) ? json_decode((string) @file_get_contents($cache), true) : null;
         $now = microtime(true);
         $rxRate = 0.0;

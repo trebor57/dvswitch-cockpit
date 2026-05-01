@@ -134,6 +134,24 @@ migrate_cache_file() {
 migrate_cache_file "/tmp/dvswitch_cockpit_dmr_subscribers.json" "$CACHE_DIR/dmr_subscribers.json"
 migrate_cache_file "/tmp/dvswitch_cockpit_gateway_history.json" "$CACHE_DIR/gateway_history.json"
 migrate_cache_file "/tmp/dvswitch_cockpit_runtime_state.json" "$CACHE_DIR/runtime_state.json"
+migrate_cache_file "/tmp/dvcockpit_cpu_sample.json" "$CACHE_DIR/dvcockpit_cpu_sample.json"
+
+for old_rate_file in /tmp/dvcockpit_rate_*.json; do
+  [[ -e "$old_rate_file" ]] || continue
+  migrate_cache_file "$old_rate_file" "$CACHE_DIR/$(basename "$old_rate_file")"
+done
+
+if [[ -d /tmp/dvswitch_cockpit_rate_limit ]]; then
+  echo "Migrating cache directory: /tmp/dvswitch_cockpit_rate_limit -> $CACHE_DIR/rate_limit"
+  mkdir -p "$CACHE_DIR/rate_limit"
+  shopt -s nullglob
+  for old_limit_file in /tmp/dvswitch_cockpit_rate_limit/*.json; do
+    migrate_cache_file "$old_limit_file" "$CACHE_DIR/rate_limit/$(basename "$old_limit_file")"
+  done
+  shopt -u nullglob
+  rmdir /tmp/dvswitch_cockpit_rate_limit 2>/dev/null || true
+fi
+
 migrate_cache_file "/var/cache/dvswitch-cockpit/subscriber_ids.lastgood.csv" "$CACHE_DIR/subscriber_ids.lastgood.csv"
 
 rmdir /var/cache/dvswitch-cockpit 2>/dev/null || true

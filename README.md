@@ -400,7 +400,7 @@ sudo /opt/MMDVM_Bridge/dvswitch.sh reloadDatabase
 To clear Cockpit's callsign cache:
 
 ```bash
-sudo rm -f /tmp/dvswitch_cockpit_dmr_subscribers.json
+sudo rm -f /var/www/html/dvswitch_cockpit/data/cache/dmr_subscribers.json
 ```
 
 ### Subscriber database protection
@@ -410,7 +410,7 @@ Cockpit protects itself from failed or partial DVSwitch subscriber database upda
 If `/var/lib/dvswitch/subscriber_ids.csv` is missing, tiny, or invalid, Cockpit will not rebuild its callsign cache from that bad file. When possible, it keeps using a last-known-good fallback copy instead:
 
 ```text
-/var/cache/dvswitch-cockpit/subscriber_ids.lastgood.csv
+/var/www/html/dvswitch_cockpit/data/cache/subscriber_ids.lastgood.csv
 ```
 
 This helps prevent QRZ/callsign links from disappearing just because a DVSwitch database update temporarily failed.
@@ -424,13 +424,13 @@ The setup script creates the cache directory and gives the web server permission
 If old activity rows look wrong after an update, clear Cockpit history:
 
 ```bash
-sudo rm -f /tmp/dvswitch_cockpit_gateway_history.json
+sudo rm -f /var/www/html/dvswitch_cockpit/data/cache/gateway_history.json
 ```
 
 If current runtime state looks stuck, clear Cockpit runtime cache:
 
 ```bash
-sudo rm -f /tmp/dvswitch_cockpit_runtime_state.json
+sudo rm -f /var/www/html/dvswitch_cockpit/data/cache/runtime_state.json
 ```
 
 Then refresh the browser.
@@ -493,7 +493,7 @@ grep '^310997,' /var/lib/dvswitch/subscriber_ids.csv
 Clear Cockpit's subscriber cache:
 
 ```bash
-sudo rm -f /tmp/dvswitch_cockpit_dmr_subscribers.json
+sudo rm -f /var/www/html/dvswitch_cockpit/data/cache/dmr_subscribers.json
 ```
 
 ---
@@ -593,3 +593,28 @@ config.ini
 DVSwitch Cockpit should remain a status/display dashboard.
 
 It should not become a connect/disconnect controller unless the project is intentionally redesigned.
+
+
+### Runtime/cache files
+
+DVSwitch Cockpit stores generated runtime/cache files inside the installed Cockpit directory:
+
+```text
+/var/www/html/dvswitch_cockpit/data/cache/dmr_subscribers.json
+/var/www/html/dvswitch_cockpit/data/cache/gateway_history.json
+/var/www/html/dvswitch_cockpit/data/cache/runtime_state.json
+/var/www/html/dvswitch_cockpit/data/cache/subscriber_ids.lastgood.csv
+```
+
+These files are generated at runtime, ignored by Git, and not meant to be committed.
+
+During updates, `setup_dvswitch_cockpit.sh` migrates older cache files from the previous temporary locations:
+
+```text
+/tmp/dvswitch_cockpit_dmr_subscribers.json
+/tmp/dvswitch_cockpit_gateway_history.json
+/tmp/dvswitch_cockpit_runtime_state.json
+/var/cache/dvswitch-cockpit/subscriber_ids.lastgood.csv
+```
+
+Only those exact old Cockpit cache files are migrated/removed. DVSwitch-owned files such as `/var/lib/dvswitch/subscriber_ids.csv`, `/tmp/ABInfo_*.json`, `/opt/Analog_Bridge/*`, and `/opt/MMDVM_Bridge/*` are not moved or deleted.

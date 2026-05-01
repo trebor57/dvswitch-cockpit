@@ -154,12 +154,20 @@ function dc_detect_subscriber_file(): string {
     return '';
 }
 
-function dc_dmr_subscriber_cache_path(): string {
-    return '/tmp/dvswitch_cockpit_dmr_subscribers.json';
+function dc_dmr_subscriber_cache_dir(): string {
+    return __DIR__ . '/../../data/cache';
 }
 
-function dc_dmr_subscriber_cache_dir(): string {
-    return '/var/cache/dvswitch-cockpit';
+function dc_dmr_subscriber_cache_path(): string {
+    return dc_dmr_subscriber_cache_dir() . '/dmr_subscribers.json';
+}
+
+function dc_dmr_subscriber_cache_max_bytes(): int {
+    return 96 * 1024 * 1024;
+}
+
+function dc_dmr_subscriber_source_max_bytes(): int {
+    return 64 * 1024 * 1024;
 }
 
 function dc_dmr_subscriber_lastgood_path(): string {
@@ -259,6 +267,9 @@ function dc_validate_dmr_subscriber_file(string $file): array {
     if ($size < dc_dmr_min_valid_bytes()) {
         return ['valid' => false, 'reason' => 'suspiciously_small', 'size' => $size, 'sample_count' => 0];
     }
+    if ($size > dc_dmr_subscriber_source_max_bytes()) {
+        return ['valid' => false, 'reason' => 'suspiciously_large', 'size' => $size, 'sample_count' => 0];
+    }
 
     $sample = dc_parse_dmr_subscriber_file($file, 5000);
     $sampleCount = count($sample);
@@ -281,24 +292,51 @@ function dc_load_cached_dmr_subscriber_map(bool $allowStale = false): array {
 
 function dc_save_dmr_subscriber_cache(string $signature, string $source, array $map, array $health): void {
     if (count($map) < dc_dmr_min_valid_rows()) return;
-    @file_put_contents(dc_dmr_subscriber_cache_path(), json_encode([
+
+    $dir = dc_dmr_subscriber_cache_dir();
+    if (!is_dir($dir)) @mkdir($dir, 0755, true);
+    if (!is_dir($dir) || !is_writable($dir)) return;
+
+    $payload = [
         'signature' => $signature,
         'source' => $source,
         'count' => count($map),
         'health' => $health,
         'created_at' => gmdate('c'),
         'map' => $map,
-    ], JSON_PRETTY_PRINT));
+    ];
+
+    $json = json_encode($payload, JSON_PRETTY_PRINT);
+    if (!is_string($json)) return;
+    if (strlen($json) > dc_dmr_subscriber_cache_max_bytes()) return;
+
+    $cacheFile = dc_dmr_subscriber_cache_path();
+    $tmp = $cacheFile . '.tmp.' . getmypid() . '.' . bin2hex(random_bytes(4));
+
+    if (@file_put_contents($tmp, $json, LOCK_EX) === false) {
+        @unlink($tmp);
+        return;
+    }
+
+    @chmod($tmp, 0644);
+    @rename($tmp, $cacheFile);
 }
 
 function dc_save_lastgood_subscriber_file(string $file): void {
     if ($file === '' || !is_readable($file)) return;
     $dir = dc_dmr_subscriber_cache_dir();
     if (!is_dir($dir)) @mkdir($dir, 0755, true);
-    if (is_dir($dir) && is_writable($dir)) {
-        @copy($file, dc_dmr_subscriber_lastgood_path());
-        @chmod(dc_dmr_subscriber_lastgood_path(), 0644);
+    if (!is_dir($dir) || !is_writable($dir)) return;
+
+    $dest = dc_dmr_subscriber_lastgood_path();
+    $tmp = $dest . '.tmp.' . getmypid() . '.' . bin2hex(random_bytes(4));
+    if (@copy($file, $tmp) === false) {
+        @unlink($tmp);
+        return;
     }
+
+    @chmod($tmp, 0644);
+    @rename($tmp, $dest);
 }
 
 function dc_load_dmr_subscriber_map(): array {

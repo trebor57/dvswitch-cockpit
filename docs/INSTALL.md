@@ -44,3 +44,14 @@ The cockpit can also detect:
 - AllTune2 private-node state when `/var/www/html/alltune2/config.ini` exists and Asterisk `rpt nodes` can be read
 
 Those integrations are optional and should not be required for a normal ASL3 / DVSwitch install.
+
+
+## Runtime/cache location
+
+The installer creates and maintains:
+
+```text
+/var/www/html/dvswitch_cockpit/data/cache/
+```
+
+This directory stores generated Cockpit cache/state files. The installer migrates older Cockpit cache files from `/tmp/dvswitch_cockpit_*.json` and `/var/cache/dvswitch-cockpit/` when present, then removes only those exact old Cockpit-created files after a successful copy.

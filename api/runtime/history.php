@@ -1,8 +1,39 @@
 <?php
 declare(strict_types=1);
 
-function dc_history_path(): string { return '/tmp/dvswitch_cockpit_gateway_history.json'; }
-function dc_state_cache_path(): string { return '/tmp/dvswitch_cockpit_runtime_state.json'; }
+function dc_cockpit_cache_dir(): string {
+    return __DIR__ . '/../../data/cache';
+}
+
+function dc_history_path(): string { return dc_cockpit_cache_dir() . '/gateway_history.json'; }
+function dc_state_cache_path(): string { return dc_cockpit_cache_dir() . '/runtime_state.json'; }
+
+function dc_cache_ensure_dir(): void {
+    $dir = dc_cockpit_cache_dir();
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0755, true);
+    }
+}
+
+function dc_cache_write_json(string $path, array $payload, int $maxBytes = 262144): void {
+    dc_cache_ensure_dir();
+
+    $json = json_encode($payload, JSON_PRETTY_PRINT);
+    if (!is_string($json)) return;
+
+    if ($maxBytes > 0 && strlen($json) > $maxBytes) {
+        return;
+    }
+
+    $tmp = $path . '.tmp.' . getmypid() . '.' . bin2hex(random_bytes(4));
+    if (@file_put_contents($tmp, $json, LOCK_EX) === false) {
+        @unlink($tmp);
+        return;
+    }
+
+    @chmod($tmp, 0644);
+    @rename($tmp, $path);
+}
 
 function dc_load_history(): array {
     $file = dc_history_path();
@@ -14,7 +45,25 @@ function dc_load_history(): array {
     return $json;
 }
 function dc_save_history(array $payload): void {
-    @file_put_contents(dc_history_path(), json_encode($payload, JSON_PRETTY_PRINT));
+    if (!isset($payload['rows']) || !is_array($payload['rows'])) {
+        $payload['rows'] = [];
+    }
+
+    usort($payload['rows'], fn($a, $b) => strcmp((string)($b['utc'] ?? ''), (string)($a['utc'] ?? '')));
+    $payload['rows'] = array_slice($payload['rows'], 0, 240);
+
+    // Keep history bounded by both row count and file size. If unusually long
+    // rows would exceed the byte cap, shrink further rather than leaving stale
+    // or ever-growing history behind.
+    while (count($payload['rows']) > 20) {
+        $json = json_encode($payload, JSON_PRETTY_PRINT);
+        if (is_string($json) && strlen($json) <= 262144) {
+            break;
+        }
+        $payload['rows'] = array_slice($payload['rows'], 0, max(20, count($payload['rows']) - 20));
+    }
+
+    dc_cache_write_json(dc_history_path(), $payload, 262144);
 }
 function dc_merge_value_is_useful($value): bool {
     $value = trim((string)$value);
@@ -239,6 +288,6 @@ function dc_load_state_cache(): array {
     return is_array($j) ? $j : [];
 }
 function dc_save_state_cache(array $state): void {
-    @file_put_contents(dc_state_cache_path(), json_encode($state, JSON_PRETTY_PRINT));
+    dc_cache_write_json(dc_state_cache_path(), $state, 65536);
 }
 ?>

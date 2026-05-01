@@ -5,7 +5,7 @@ APP_NAME="DVSwitch Cockpit"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST_DIR="${DEST_DIR:-/var/www/html/dvswitch_cockpit}"
 SUDOERS_FILE="${SUDOERS_FILE:-/etc/sudoers.d/dvswitch-cockpit-services}"
-CACHE_DIR="${CACHE_DIR:-/var/cache/dvswitch-cockpit}"
+CACHE_DIR="${CACHE_DIR:-$DEST_DIR/data/cache}"
 APACHE_CONF_FILE="${APACHE_CONF_FILE:-/etc/apache2/conf-available/dvswitch-cockpit-security.conf}"
 WEB_USER="${WEB_USER:-www-data}"
 WEB_GROUP="${WEB_GROUP:-www-data}"
@@ -74,11 +74,17 @@ else
       --exclude '*.tar' \
       --exclude '*.tar.gz' \
       --exclude '*.tgz' \
+      --exclude '*.before-*' \
+      --exclude '*.after-*' \
+      --exclude '*.backup*' \
+      --exclude 'backup*/' \
+      --exclude 'backups*/' \
+      --exclude 'data/cache/' \
       --exclude '*~' \
       "$SRC_DIR/" "$DEST_DIR/"
   else
     echo "rsync not found; using tar fallback."
-    find "$DEST_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    find "$DEST_DIR" -mindepth 1 -maxdepth 1 ! -name data -exec rm -rf {} +
     (cd "$SRC_DIR" && tar \
       --exclude='./.git' \
       --exclude='./__pycache__' \
@@ -93,24 +99,57 @@ else
       --exclude='*.tar' \
       --exclude='*.tar.gz' \
       --exclude='*.tgz' \
+      --exclude='*.before-*' \
+      --exclude='*.after-*' \
+      --exclude='*.backup*' \
+      --exclude='backup*/' \
+      --exclude='backups*/' \
+      --exclude='./data/cache' \
+      --exclude='./data/cache/*' \
       --exclude='*~' \
       -cf - .) | (cd "$DEST_DIR" && tar -xf -)
   fi
 fi
 
 echo
-echo "[3/7] Applying ownership and permissions..."
+echo "[3/7] Applying ownership, permissions, and runtime cache migration..."
 mkdir -p "$CACHE_DIR"
+
+migrate_cache_file() {
+  local old_path="$1"
+  local new_path="$2"
+
+  if [[ -f "$old_path" ]]; then
+    echo "Migrating cache: $old_path -> $new_path"
+    mkdir -p "$(dirname "$new_path")"
+    if cp -f "$old_path" "$new_path"; then
+      chmod 0644 "$new_path" || true
+      rm -f "$old_path" || true
+    else
+      echo "Warning: failed to migrate $old_path; leaving old file in place." >&2
+    fi
+  fi
+}
+
+migrate_cache_file "/tmp/dvswitch_cockpit_dmr_subscribers.json" "$CACHE_DIR/dmr_subscribers.json"
+migrate_cache_file "/tmp/dvswitch_cockpit_gateway_history.json" "$CACHE_DIR/gateway_history.json"
+migrate_cache_file "/tmp/dvswitch_cockpit_runtime_state.json" "$CACHE_DIR/runtime_state.json"
+migrate_cache_file "/var/cache/dvswitch-cockpit/subscriber_ids.lastgood.csv" "$CACHE_DIR/subscriber_ids.lastgood.csv"
+
+rmdir /var/cache/dvswitch-cockpit 2>/dev/null || true
+
 if id "$WEB_USER" >/dev/null 2>&1; then
   chown -R "$WEB_USER:$WEB_GROUP" "$DEST_DIR" || true
   chown -R "$WEB_USER:$WEB_GROUP" "$CACHE_DIR" || true
 else
   echo "Warning: web user '$WEB_USER' not found; ownership unchanged."
 fi
+chmod 0755 "$DEST_DIR/data" 2>/dev/null || true
 chmod 0755 "$CACHE_DIR" || true
+find "$CACHE_DIR" -type f -exec chmod 0644 {} + 2>/dev/null || true
 
-find "$DEST_DIR" -type d -exec chmod 0755 {} +
-find "$DEST_DIR" -type f -exec chmod 0644 {} +
+find "$DEST_DIR" -type d -not -path "$CACHE_DIR" -not -path "$CACHE_DIR/*" -exec chmod 0755 {} +
+find "$DEST_DIR" -type f -not -path "$CACHE_DIR/*" -exec chmod 0644 {} +
 chmod 0755 "$DEST_DIR/setup_dvswitch_cockpit.sh" 2>/dev/null || true
 
 echo
@@ -143,7 +182,7 @@ if [[ -d /etc/apache2/conf-available ]]; then
     </FilesMatch>
 </Directory>
 
-<DirectoryMatch "^$DEST_DIR/(\.git|\.github|docs|systemd|tools|templates|includes|api/runtime)(/|$)">
+<DirectoryMatch "^$DEST_DIR/(\.git|\.github|docs|systemd|tools|templates|includes|api/runtime|data/cache)(/|$)">
     Require all denied
 </DirectoryMatch>
 EOF_APACHE

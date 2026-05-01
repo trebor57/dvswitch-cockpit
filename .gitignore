@@ -38,3 +38,6 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# Cockpit runtime/cache files
+data/cache/

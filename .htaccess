@@ -19,5 +19,5 @@ Options -Indexes
 
 <IfModule mod_rewrite.c>
   RewriteEngine On
-  RewriteRule (^|/)(\.git|\.github|docs|systemd|tools|templates|includes|api/runtime)(/|$) - [F,L]
+  RewriteRule (^|/)(\.git|\.github|docs|systemd|tools|templates|includes|api/runtime|data/cache)(/|$) - [F,L]
 </IfModule>

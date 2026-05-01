@@ -1,29 +1,40 @@
-.gitignore
-.htaccess
-README.md
-VERSION
-api/runtime/adapters/BmStfuAdapter.php
-api/runtime/adapters/BmStockAdapter.php
-api/runtime/adapters/DstarAdapter.php
-api/runtime/adapters/GenericAdapter.php
-api/runtime/adapters/TgifHblinkAdapter.php
-api/runtime/adapters/YsfAdapter.php
-api/runtime/common.php
-api/runtime/history.php
-api/runtime/resolver.php
-api/runtime_status.php
-api/security.php
-api/service_action.php
-docs/BACKEND_PLAN.md
-docs/GITHUB_READY.md
-docs/INSTALL.md
-docs/PROJECT_NOTES.md
-docs/RECOVERY_NOTES.md
-includes/system_ribbon.php
-index.html
-index.php
-screenshot.png
-setup_dvswitch_cockpit.sh
-static/app.css
-static/app.js
-systemd/sudoers.dvswitch-cockpit-example
+dvswitch_cockpit/
+|-- api/
+|   |-- runtime/
+|   |   |-- adapters/
+|   |   |   |-- BmStfuAdapter.php
+|   |   |   |-- BmStockAdapter.php
+|   |   |   |-- DstarAdapter.php
+|   |   |   |-- GenericAdapter.php
+|   |   |   |-- TgifHblinkAdapter.php
+|   |   |   `-- YsfAdapter.php
+|   |   |-- common.php
+|   |   |-- history.php
+|   |   `-- resolver.php
+|   |-- runtime_status.php
+|   |-- security.php
+|   `-- service_action.php
+|-- data/
+|   `-- cache/
+|-- docs/
+|   |-- BACKEND_PLAN.md
+|   |-- GITHUB_READY.md
+|   |-- INSTALL.md
+|   |-- PROJECT_NOTES.md
+|   `-- RECOVERY_NOTES.md
+|-- includes/
+|   `-- system_ribbon.php
+|-- static/
+|   |-- app.css
+|   `-- app.js
+|-- systemd/
+|   `-- sudoers.dvswitch-cockpit-example
+|-- .gitignore
+|-- .htaccess
+|-- index.html
+|-- index.php
+|-- README.md
+|-- screenshot.png
+|-- setup_dvswitch_cockpit.sh
+|-- tree.txt
+`-- VERSION

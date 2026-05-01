@@ -608,6 +608,8 @@ DVSwitch Cockpit stores generated runtime/cache files inside the installed Cockp
 
 These files are generated at runtime, ignored by Git, and not meant to be committed.
 
+The repository includes `data/cache/.gitkeep` only so GitHub shows the expected cache directory. Runtime files in `data/cache/` are generated locally, ignored by Git, and should not be committed.
+
 During updates, `setup_dvswitch_cockpit.sh` migrates older cache files from the previous temporary locations:
 
 ```text

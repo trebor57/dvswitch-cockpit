@@ -16,6 +16,7 @@ dvswitch_cockpit/
 |   `-- service_action.php
 |-- data/
 |   `-- cache/
+|       `-- .gitkeep
 |-- docs/
 |   |-- BACKEND_PLAN.md
 |   |-- GITHUB_READY.md

@@ -191,3 +191,40 @@ document.addEventListener('DOMContentLoaded',function(){
   document.querySelectorAll('[data-service-action]').forEach(b=>b.addEventListener('click',()=>serviceAction(b)))
 })
 })();
+
+
+(function(){
+  function refreshRibbon(root){
+    const endpoint = root.getAttribute('data-endpoint');
+    if (!endpoint) return;
+
+    fetch(endpoint, {cache: 'no-store'})
+      .then(function(res){
+        if (!res.ok) throw new Error('Ribbon status unavailable');
+        return res.json();
+      })
+      .then(function(data){
+        Object.keys(data || {}).forEach(function(key){
+          const node = root.querySelector('[data-k="' + key + '"]');
+          if (node) node.textContent = data[key];
+        });
+      })
+      .catch(function(){});
+  }
+
+  function initSystemRibbon(){
+    document.querySelectorAll('.dvc-ribbon[data-endpoint]').forEach(function(root){
+      if (root.dataset.ribbonInit === '1') return;
+      root.dataset.ribbonInit = '1';
+      refreshRibbon(root);
+      setInterval(function(){ refreshRibbon(root); }, 5000);
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initSystemRibbon);
+  } else {
+    initSystemRibbon();
+  }
+})();
+

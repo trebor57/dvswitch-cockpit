@@ -1,6 +1,16 @@
 <?php
 declare(strict_types=1);
 
+function dvc_apply_system_timezone(): void
+{
+    $tz = trim((string) @file_get_contents('/etc/timezone'));
+    if ($tz !== '' && @timezone_open($tz) !== false) {
+        date_default_timezone_set($tz);
+    }
+}
+
+dvc_apply_system_timezone();
+
 function dvc_exec(string $cmd): string
 {
     $out = function_exists('shell_exec') ? @shell_exec($cmd) : '';
@@ -262,7 +272,7 @@ function dvc_chip(array $initial, string $label, string $key, bool $hot = false)
     return '<span class="dvc-ribbon-pill"><span class="dvc-l">' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</span><span class="dvc-v' . $hotClass . '" data-k="' . htmlspecialchars($key, ENT_QUOTES, 'UTF-8') . '">' . $value . '</span></span>';
 }
 ?>
-<div id="<?= $id ?>" class="dvc-ribbon" data-endpoint="includes/<?= $self ?>?dvc_ribbon_ajax=1">
+<div id="<?= $id ?>" class="dvc-ribbon" data-endpoint="index.php?dvc_ribbon_ajax=1">
 <style>
 #<?= $id ?>.dvc-ribbon{display:block;width:100%;max-width:1220px;margin:2px auto 6px;padding:4px 6px;border:1px solid rgba(140,112,210,.22);border-radius:10px;background:linear-gradient(180deg,rgba(20,11,33,.94),rgba(14,8,23,.96));box-shadow:inset 0 0 0 1px rgba(255,255,255,.02);font-family:Arial,Helvetica,sans-serif}
 #<?= $id ?> .dvc-ribbon-row{display:flex;width:100%;gap:4px;align-items:center;justify-content:center;flex-wrap:wrap;white-space:normal;overflow-x:visible;margin:0 auto}
@@ -288,5 +298,4 @@ function dvc_chip(array $initial, string $label, string $key, bool $hot = false)
 <?= dvc_chip($initial, 'HBL', 'hblink', true) ?>
 <?= dvc_chip($initial, 'STFU', 'stfu', true) ?>
 </div>
-<script>(function(){const root=document.getElementById(<?= json_encode($id) ?>);if(!root)return;const endpoint=root.getAttribute('data-endpoint');async function refreshRibbon(){try{const res=await fetch(endpoint,{cache:'no-store'});if(!res.ok)return;const data=await res.json();Object.keys(data).forEach((key)=>{const node=root.querySelector('[data-k="'+key+'"]');if(node)node.textContent=data[key];});}catch(err){}}setInterval(refreshRibbon,5000);})();</script>
 </div>

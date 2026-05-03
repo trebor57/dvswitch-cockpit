@@ -1,6 +1,12 @@
 <?php declare(strict_types=1);
 require __DIR__ . '/api/security.php';
 dc_security_require_trusted_client();
+
+if (isset($_GET['dvc_ribbon_ajax']) && $_GET['dvc_ribbon_ajax'] === '1') {
+    require __DIR__ . '/includes/system_ribbon.php';
+    exit;
+}
+
 $dvcVersion = trim((string)@file_get_contents(__DIR__ . '/VERSION'));
 if ($dvcVersion === '') { $dvcVersion = '0.0.0'; }
 ?>

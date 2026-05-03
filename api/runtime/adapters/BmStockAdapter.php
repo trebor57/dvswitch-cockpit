@@ -81,6 +81,10 @@ function dc_adapter_bm_stock(array $analogLines, array $abinfo, array $services,
                 continue;
             }
 
+            if ($currentTarget === '' && preg_match('/^[0-9]+$/', $targetNum) === 1 && $targetNum !== '0') {
+                $currentTarget = $targetNum;
+            }
+
             $rows[] = dc_make_row(
                 (string)($stamp['utc'] ?? ''),
                 (string)($stamp['display'] ?? '--'),
@@ -107,22 +111,26 @@ function dc_adapter_bm_stock(array $analogLines, array $abinfo, array $services,
         $currentTarget = $runtimeTg;
     }
     if ($currentTarget === '' && isset($cache['bm_stock']['target_display'])) {
-        $currentTarget = preg_replace('/^TG\s+/', '', (string)$cache['bm_stock']['target_display']);
+        $cachedTarget = preg_replace('/^TG\s+/', '', trim((string)$cache['bm_stock']['target_display']));
+        $cachedSignal = (int)($cache['bm_stock']['signal_epoch'] ?? 0);
+        if (
+            preg_match('/^[0-9]+$/', $cachedTarget) === 1 &&
+            $cachedTarget !== '0' &&
+            ($gateway === '' || $cachedTarget !== $gateway) &&
+            $cachedSignal > 0 &&
+            (time() - $cachedSignal) < 180
+        ) {
+            $currentTarget = $cachedTarget;
+        }
     }
 
-    $targetIsStandbyGateway = ($gateway !== '' && $currentTarget === $gateway);
+    $hasNumericTarget = preg_match('/^[0-9]+$/', $currentTarget) === 1;
+    $targetIsStandbyGateway = ($gateway !== '' && $hasNumericTarget && $currentTarget === $gateway);
+    $hasRealBmTarget = $hasNumericTarget && $currentTarget !== '0' && !$targetIsStandbyGateway;
     $recentRuntimeTg = $runtimeTg !== '' && ($runtimeTgEpoch > 0) && ((time() - $runtimeTgEpoch) < 120);
 
     $state = 'Idle';
-    $now = time();
-    if (
-        !$targetIsStandbyGateway &&
-        (
-            ($currentTarget !== '' && $currentTarget !== '0') ||
-            ($lastSignal > 0 && ($now - $lastSignal) < 180) ||
-            (($cache['bm_stock']['connection_state'] ?? '') === 'Connected')
-        )
-    ) {
+    if ($hasRealBmTarget) {
         $state = 'Connected';
     }
 
@@ -139,12 +147,12 @@ function dc_adapter_bm_stock(array $analogLines, array $abinfo, array $services,
         'network' => 'BrandMeister',
         'connection_state' => $state,
         'path_label' => $state === 'Connected' ? 'DMR' : 'Idle',
-        'target_display' => (!$targetIsStandbyGateway && $currentTarget !== '') ? ('TG ' . $currentTarget) : '--',
+        'target_display' => $hasRealBmTarget ? ('TG ' . $currentTarget) : '--',
         'target_note' => '(from stock DMR / Analog_Bridge)',
         'last_heard' => $lastHeard !== '--' ? $lastHeard : (string)($cache['bm_stock']['last_heard'] ?? '--'),
         'rows' => array_slice($rows, 0, 40),
         'left_label' => 'Current TG',
-        'left_value' => (!$targetIsStandbyGateway && $currentTarget !== '') ? ('TG ' . $currentTarget) : '--',
+        'left_value' => $hasRealBmTarget ? ('TG ' . $currentTarget) : '--',
         'signal_epoch' => $lastSignal,
     ];
 }

@@ -156,6 +156,14 @@ migrate_cache_file "/var/cache/dvswitch-cockpit/subscriber_ids.lastgood.csv" "$C
 
 rmdir /var/cache/dvswitch-cockpit 2>/dev/null || true
 
+# runtime_state.json is Cockpit-generated display state. It is safe to rebuild
+# and must not carry stale provider/connection state across updates.
+# Do not clear subscriber lookup cache, gateway history, ribbon samples, or rate limits.
+if [[ -f "$CACHE_DIR/runtime_state.json" ]]; then
+  echo "Clearing generated runtime state cache: $CACHE_DIR/runtime_state.json"
+  rm -f "$CACHE_DIR/runtime_state.json"
+fi
+
 if id "$WEB_USER" >/dev/null 2>&1; then
   chown -R "$WEB_USER:$WEB_GROUP" "$DEST_DIR" || true
   chown -R "$WEB_USER:$WEB_GROUP" "$CACHE_DIR" || true

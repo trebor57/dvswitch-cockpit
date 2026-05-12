@@ -42,3 +42,8 @@ __pycache__/
 # Cockpit runtime/cache files
 data/cache/*
 !data/cache/.gitkeep
+
+# Cockpit private auth config
+data/private/*
+!data/private/.gitkeep
+!data/private/auth.ini.example

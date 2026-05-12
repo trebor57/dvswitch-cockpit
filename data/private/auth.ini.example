@@ -1,0 +1,6 @@
+; DVSwitch Cockpit optional web login
+; The real local file is data/private/auth.ini and must not be committed.
+
+DVSWITCH_COCKPIT_AUTH_ENABLED=0
+DVSWITCH_COCKPIT_ADMIN_USER="admin"
+DVSWITCH_COCKPIT_ADMIN_PASSWORD_HASH=""

@@ -6,6 +6,9 @@ SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST_DIR="${DEST_DIR:-/var/www/html/dvswitch_cockpit}"
 SUDOERS_FILE="${SUDOERS_FILE:-/etc/sudoers.d/dvswitch-cockpit-services}"
 CACHE_DIR="${CACHE_DIR:-$DEST_DIR/data/cache}"
+PRIVATE_DIR="${PRIVATE_DIR:-$DEST_DIR/data/private}"
+AUTH_CONFIG_FILE="${AUTH_CONFIG_FILE:-$PRIVATE_DIR/auth.ini}"
+AUTH_CONFIG_EXAMPLE_FILE="${AUTH_CONFIG_EXAMPLE_FILE:-$PRIVATE_DIR/auth.ini.example}"
 APACHE_CONF_FILE="${APACHE_CONF_FILE:-/etc/apache2/conf-available/dvswitch-cockpit-security.conf}"
 WEB_USER="${WEB_USER:-www-data}"
 WEB_GROUP="${WEB_GROUP:-www-data}"
@@ -80,6 +83,7 @@ else
       --exclude 'backup*/' \
       --exclude 'backups*/' \
       --exclude 'data/cache/' \
+      --exclude 'data/private/auth.ini' \
       --exclude '*~' \
       "$SRC_DIR/" "$DEST_DIR/"
   else
@@ -106,6 +110,7 @@ else
       --exclude='backups*/' \
       --exclude='./data/cache' \
       --exclude='./data/cache/*' \
+      --exclude='./data/private/auth.ini' \
       --exclude='*~' \
       -cf - .) | (cd "$DEST_DIR" && tar -xf -)
   fi
@@ -113,7 +118,25 @@ fi
 
 echo
 echo "[3/7] Applying ownership, permissions, and runtime cache migration..."
-mkdir -p "$CACHE_DIR"
+mkdir -p "$CACHE_DIR" "$PRIVATE_DIR"
+
+# Create disabled-by-default auth config if missing.
+# Normal setup/update must preserve this file once it exists.
+if [[ ! -f "$AUTH_CONFIG_EXAMPLE_FILE" ]]; then
+  cat > "$AUTH_CONFIG_EXAMPLE_FILE" <<'EOF_AUTH_EXAMPLE'
+; DVSwitch Cockpit optional web login
+; The real local file is data/private/auth.ini and must not be committed.
+
+DVSWITCH_COCKPIT_AUTH_ENABLED=0
+DVSWITCH_COCKPIT_ADMIN_USER="admin"
+DVSWITCH_COCKPIT_ADMIN_PASSWORD_HASH=""
+EOF_AUTH_EXAMPLE
+fi
+
+if [[ ! -f "$AUTH_CONFIG_FILE" ]]; then
+  cp "$AUTH_CONFIG_EXAMPLE_FILE" "$AUTH_CONFIG_FILE"
+fi
+
 
 migrate_cache_file() {
   local old_path="$1"
@@ -178,6 +201,23 @@ find "$DEST_DIR" -type d -not -path "$CACHE_DIR" -not -path "$CACHE_DIR/*" -exec
 find "$DEST_DIR" -type f -not -path "$CACHE_DIR/*" -exec chmod 0644 {} +
 chmod 0755 "$DEST_DIR/setup_dvswitch_cockpit.sh" 2>/dev/null || true
 
+# Private auth config is readable by the web group but not browser-served.
+if [[ -d "$PRIVATE_DIR" ]]; then
+  chown root:"$WEB_GROUP" "$PRIVATE_DIR" 2>/dev/null || true
+  chmod 0750 "$PRIVATE_DIR" 2>/dev/null || true
+fi
+
+if [[ -f "$AUTH_CONFIG_FILE" ]]; then
+  chown root:"$WEB_GROUP" "$AUTH_CONFIG_FILE" 2>/dev/null || true
+  chmod 0640 "$AUTH_CONFIG_FILE" 2>/dev/null || true
+fi
+
+if [[ -f "$AUTH_CONFIG_EXAMPLE_FILE" ]]; then
+  chown root:root "$AUTH_CONFIG_EXAMPLE_FILE" 2>/dev/null || true
+  chmod 0644 "$AUTH_CONFIG_EXAMPLE_FILE" 2>/dev/null || true
+fi
+
+
 echo
 echo "[4/7] Installing sudoers rule..."
 cat > "$SUDOERS_FILE" <<EOF_SUDOERS
@@ -232,6 +272,7 @@ echo "[7/7] Setup summary"
 echo "Install path: $DEST_DIR"
 echo "Sudoers:     $SUDOERS_FILE"
 echo "Cache dir:   $CACHE_DIR"
+echo "Auth config: $AUTH_CONFIG_FILE"
 echo "Apache conf: $APACHE_CONF_FILE"
 echo
 echo "Open:"
@@ -242,6 +283,7 @@ echo "  - Cockpit reads runtime state only."
 echo "  - It does not perform BM/TGIF/YSF connect or disconnect actions."
 echo "  - Restart buttons are limited to Analog_Bridge and MMDVM_Bridge."
 echo "  - DMR callsign lookup uses the existing DVSwitch subscriber database when available."
+echo "  - Optional web login config is created disabled by default."
 echo "  - A last-known-good subscriber fallback is kept in $CACHE_DIR when possible."
 echo
 echo "Setup complete."

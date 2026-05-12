@@ -9,6 +9,11 @@ if (isset($_GET['dvc_ribbon_ajax']) && $_GET['dvc_ribbon_ajax'] === '1') {
 
 $dvcVersion = trim((string)@file_get_contents(__DIR__ . '/VERSION'));
 if ($dvcVersion === '') { $dvcVersion = '0.0.0'; }
+
+$dvcAssetVersion = $dvcVersion . '-' . max(
+    (int)@filemtime(__DIR__ . '/static/app.css'),
+    (int)@filemtime(__DIR__ . '/static/app.js')
+);
 ?>
 <!doctype html>
 <html lang="en">
@@ -16,7 +21,7 @@ if ($dvcVersion === '') { $dvcVersion = '0.0.0'; }
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DVSwitch Cockpit</title>
-  <link rel="stylesheet" href="static/app.css">
+  <link rel="stylesheet" href="static/app.css?v=<?= htmlspecialchars($dvcAssetVersion, ENT_QUOTES) ?>">
 </head>
 <body>
   <header class="top-header">
@@ -150,6 +155,6 @@ if ($dvcVersion === '') { $dvcVersion = '0.0.0'; }
   </main>
 
 
-  <script src="static/app.js"></script>
+  <script src="static/app.js?v=<?= htmlspecialchars($dvcAssetVersion, ENT_QUOTES) ?>"></script>
 </body>
 </html>

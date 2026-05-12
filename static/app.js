@@ -139,6 +139,7 @@ function apply(d){
  table('gateway-table',d.gateway_activity||[])
  table('local-table',d.local_activity||[])
  recent(d.recent_events||[])
+ updateServiceButtonState(d)
  const status=document.getElementById('action-status')
  if(status && d.service_control_verified && !status.dataset.locked){
    status.className='action-status ok'

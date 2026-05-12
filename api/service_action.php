@@ -7,6 +7,12 @@ dc_security_require_trusted_client();
 dc_security_require_post();
 dc_security_same_origin_required();
 dc_security_require_action_header();
+
+if (dc_security_auth_enabled()) {
+    dc_security_require_authenticated();
+    dc_security_require_csrf();
+}
+
 dc_security_rate_limit('service_action', 3, 60);
 
 header('Content-Type: application/json');

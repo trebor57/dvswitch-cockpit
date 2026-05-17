@@ -462,6 +462,89 @@ else
 fi
 
 echo
+echo "[5b/7] Installing Apache access-log filter if available..."
+if command -v apache2ctl >/dev/null 2>&1; then
+  APACHE_FILTER_BACKUP_DIR="/root/dvswitch-cockpit-backups/apache-accesslog-filter-$(date +%Y%m%d-%H%M%S)"
+
+  if ! python3 - "$APACHE_FILTER_BACKUP_DIR" <<'PYAPACHE'
+import pathlib
+import shutil
+import sys
+
+backup_dir = pathlib.Path(sys.argv[1])
+
+paths = []
+for base in (pathlib.Path("/etc/apache2/sites-available"), pathlib.Path("/etc/apache2/sites-enabled")):
+    if not base.exists():
+        continue
+    for item in base.glob("*.conf"):
+        try:
+            real = item.resolve()
+        except Exception:
+            continue
+        if real.exists() and real.is_file() and real not in paths:
+            paths.append(real)
+
+if not paths:
+    print("No Apache site files found for access-log filtering.")
+    raise SystemExit(0)
+
+combined_line = 'CustomLog ${APACHE_LOG_DIR}/access.log combined "expr=!((%{REQUEST_URI} =~ m#^/alltune2/(api/status\\.php|public/alltune2_ribbon_bar\\.php)#) || (%{REQUEST_URI} =~ m#^/dvswitch_cockpit/api/runtime_status\\.php#) || ((%{REQUEST_URI} =~ m#^/dvswitch_cockpit/index\\.php#) && (%{QUERY_STRING} =~ m#(^|&)dvc_ribbon_ajax=1(&|$)#)))"'
+
+plain_line = "CustomLog ${APACHE_LOG_DIR}/access.log combined"
+alltune2_line = 'CustomLog ${APACHE_LOG_DIR}/access.log combined "expr=!(%{REQUEST_URI} =~ m#^/alltune2/(api/status\\.php|public/alltune2_ribbon_bar\\.php)#)"'
+
+changed = []
+skipped = []
+
+for path in paths:
+    text = path.read_text()
+
+    if "dvswitch_cockpit/api/runtime_status" in text and "dvc_ribbon_ajax" in text:
+        continue
+
+    if alltune2_line in text:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, backup_dir / path.name)
+        path.write_text(text.replace(alltune2_line, combined_line, 1))
+        changed.append(str(path))
+        continue
+
+    if plain_line in text and "expr=" not in text:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, backup_dir / path.name)
+        path.write_text(text.replace(plain_line, combined_line, 1))
+        changed.append(str(path))
+        continue
+
+    if plain_line in text and "expr=" in text:
+        skipped.append(str(path))
+
+if changed:
+    for item in changed:
+        print(f"Installed Cockpit access-log filter in {item}")
+elif skipped:
+    print("Apache CustomLog already has a custom expression; skipped automatic Cockpit access-log filter for:")
+    for item in skipped:
+        print(f"  {item}")
+else:
+    print("Cockpit access-log filter already present or no matching CustomLog lines found.")
+PYAPACHE
+  then
+    echo "Warning: failed while attempting to install Apache access-log filter." >&2
+  fi
+
+  if ! apache2ctl configtest >/dev/null; then
+    echo "Apache configtest failed after access-log filter update." >&2
+    echo "Review backups under: $APACHE_FILTER_BACKUP_DIR" >&2
+    exit 1
+  fi
+else
+  echo "apache2ctl not found; skipping Apache access-log filter."
+fi
+
+
+echo
 echo "[6/7] Reloading Apache if available..."
 if systemctl list-unit-files apache2.service >/dev/null 2>&1; then
   systemctl reload apache2 || systemctl restart apache2 || true

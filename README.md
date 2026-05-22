@@ -42,6 +42,18 @@ With it, you can:
 - restart MMDVM_Bridge
 - restart Analog_Bridge + MMDVM_Bridge together
 
+---  
+
+<p align="center">
+    <a href="screenshot.png">
+    <img src="screenshot.png" alt="DVSwitch Cockpit dashboard screenshot" width="850">
+  </a>
+</p>
+
+<p align="center">
+  <em>DVSwitch Cockpit dashboard showing node status, gateway activity, local activity, and DVSwitch runtime information.</em>
+</p>
+
 ---
 
 ## 🚫 What DVSwitch Cockpit does not do

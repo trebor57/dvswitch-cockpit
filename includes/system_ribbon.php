@@ -232,8 +232,29 @@ function dvc_collect(): array
 
     $ab = dvc_service_state(['analog_bridge.service']);
     $mb = dvc_service_state(['mmdvm_bridge.service']);
-    $hblink = dvc_service_state(['alltune2-hblink.service', 'hblink.service', 'hblink3.service']);
-    if ($hblink === 'OFF') $hblink = dvc_process_state('hblink|HBlink|tgif-hblink');
+    $hblink = 'OFF';
+
+    $tgifdStateFile = '/var/www/html/alltune2/run/alltune2-tgifd.state';
+    $tgifdPidFile = '/var/www/html/alltune2/run/alltune2-tgifd.pid';
+    $tgifdActive = false;
+    $tgifdPid = '';
+
+    if (is_readable($tgifdStateFile)) {
+        foreach (file($tgifdStateFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+            if (!str_contains($line, '=')) continue;
+            [$k, $v] = array_map('trim', explode('=', $line, 2));
+            if ($k === 'active' && strtolower(trim($v, "\"' ")) === 'true') $tgifdActive = true;
+            if ($k === 'pid') $tgifdPid = preg_replace('/\D+/', '', $v) ?? '';
+        }
+    }
+
+    if ($tgifdPid === '' && is_readable($tgifdPidFile)) {
+        $tgifdPid = preg_replace('/\D+/', '', (string) @file_get_contents($tgifdPidFile)) ?? '';
+    }
+
+    if ($tgifdActive && $tgifdPid !== '' && is_dir('/proc/' . $tgifdPid)) {
+        $hblink = 'ON';
+    }
     $stfu = dvc_process_state('stfu|STFU|bm-stfu');
 
     return [

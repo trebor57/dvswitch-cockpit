@@ -43,7 +43,7 @@ function dc_adapter_bm_stfu(array $stfuLines, array $abinfo, array $cache, strin
     };
 
     $localStation = function () use ($gateway, $localCall): string {
-        // Prefer station callsign for local key-up rows. Falling back to the
+        // Prefer station callsign for explicit local TX rows. Falling back to the
         // gateway DMR ID is still useful because subscriber lookup may resolve it.
         if ($localCall !== '') return $localCall;
         if ($gateway !== '') return $gateway;
@@ -99,11 +99,29 @@ function dc_adapter_bm_stfu(array $stfuLines, array $abinfo, array $cache, strin
             $rememberTarget($rowTargetNum, 'STFU traffic');
             $target = 'TG ' . $rowTargetNum;
 
-            // Local STFU/parrot/self key-ups can log src as the selected TG
-            // instead of a real remote station. Those belong in Local Activity.
-            $isLikelyLocalKeyup = ($src !== '' && $rowTargetNum !== '' && $src === $rowTargetNum);
-            $rowStation = $isLikelyLocalKeyup ? $localStation() : $src;
-            $rowSource = $isLikelyLocalKeyup ? 'LNet' : 'Net';
+            // STFU can log some bridged BM traffic as src=<selected TG>,
+            // dst=<selected TG>. That is not proof of local TX, so do not
+            // invent KC3KMV/LNet. Also do not guess from Talker Alias. Show the
+            // source value STFU actually reported so the row remains traceable.
+            $isAmbiguousTgSource = ($src !== '' && $rowTargetNum !== '' && $src === $rowTargetNum);
+            if ($isAmbiguousTgSource) {
+                $rows[] = dc_make_row(
+                    (string)($stamp['utc'] ?? ''),
+                    (string)($stamp['display'] ?? '--'),
+                    'DMR/BM',
+                    $src,
+                    $target,
+                    'Net'
+                );
+                $openIdx = count($rows) - 1;
+                $lastHeard = $src;
+                $lastSignal = max($lastSignal, $epoch);
+                $lastConnectEpoch = max($lastConnectEpoch, $epoch);
+                continue;
+            }
+
+            $rowStation = $src;
+            $rowSource = 'Net';
 
             $rows[] = dc_make_row(
                 (string)($stamp['utc'] ?? ''),
@@ -125,27 +143,10 @@ function dc_adapter_bm_stfu(array $stfuLines, array $abinfo, array $cache, strin
             if ($openIdx !== null && isset($rows[$openIdx])) {
                 $rows[$openIdx]['dur'] = dc_frame_count_to_seconds($m[1]);
                 $openIdx = null;
-            } else {
-                // Some STFU/local-TX cases, especially when the selected BM TG
-                // matches the local gateway/user ID, only log the end/frame-count
-                // line. Still record the key-up duration, but use only the
-                // trusted selected target (Remote CMD / ABInfo), never a private
-                // gateway destination frame as the target.
-                $selected = $selectedTargetNow();
-                if ($selected !== '') {
-                    $rows[] = dc_make_row(
-                        (string)($stamp['utc'] ?? ''),
-                        (string)($stamp['display'] ?? '--'),
-                        'DMR/BM',
-                        $localStation(),
-                        'TG ' . $selected,
-                        'LNet',
-                        dc_frame_count_to_seconds($m[1])
-                    );
-                    $lastHeard = $localStation();
-                    $lastConnectEpoch = max($lastConnectEpoch, $epoch);
-                }
             }
+            // Do not invent a Local Activity row from an orphan end/frame-count
+            // line. Without a matching begin line, STFU does not provide enough
+            // evidence to classify the event as local.
             $lastSignal = max($lastSignal, $epoch);
             continue;
         }
